@@ -16,4 +16,5 @@ import { connectDatabase } from "./config/database";
 
 // startServer();
 
+
 export default app;

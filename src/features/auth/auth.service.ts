@@ -41,18 +41,19 @@ export class AuthService {
       password: hashedPassword,
       role,
     });
-
+console.log("user", user)
     const jwtPayload: JwtPayload = {
       userId: user.id,
       role: user.role,
     };
+    console.log("jwt----",jwtPayload)
 
     const accessToken = generateAccessToken(jwtPayload);
     const refreshToken = generateRefreshToken(jwtPayload);
 
     user.refreshToken = refreshToken;
     await user.save();
-
+ console.log("user saved")
     return {
       accessToken,
       refreshToken,
