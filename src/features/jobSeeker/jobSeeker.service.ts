@@ -6,6 +6,7 @@ import { JOB_SEEKER_MESSAGES } from "./jobSeeker.constants";
 import {
   CreateJobSeekerProfileInput,
   UpdateJobSeekerProfileInput,
+  JobSeekerQuery,
 } from "./jobSeeker.types";
 
 export class JobSeekerService {
@@ -58,6 +59,70 @@ export class JobSeekerService {
     const profile = await JobSeekerProfile.findOne({
       userId,
     }).populate(
+      "userId",
+      "email role createdAt"
+    );
+
+    if (!profile) {
+      throw new ApiError(
+        HTTP_STATUS.NOT_FOUND,
+        JOB_SEEKER_MESSAGES.PROFILE_NOT_FOUND
+      );
+    }
+
+    return profile;
+  }
+
+  /**
+   * Get All Candidate Profiles with Pagination
+   */
+  static async getAllProfiles(query: JobSeekerQuery) {
+    const filter: any = {};
+
+    if (query.search) {
+      filter.$or = [
+        { firstName: { $regex: query.search, $options: "i" } },
+        { lastName: { $regex: query.search, $options: "i" } },
+        { headline: { $regex: query.search, $options: "i" } },
+      ];
+    }
+
+    if (query.location) {
+      filter.currentLocation = { $regex: query.location, $options: "i" };
+    }
+
+    if (query.skill) {
+      filter.skills = { $in: [new RegExp(query.skill, "i")] };
+    }
+
+    const page = Number(query.page) || 1;
+    const limit = Number(query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const profiles = await JobSeekerProfile.find(filter)
+      .populate("userId", "email role createdAt")
+      .skip(skip)
+      .limit(limit)
+      .sort({ createdAt: -1 });
+
+    const total = await JobSeekerProfile.countDocuments(filter);
+
+    return {
+      profiles,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  /**
+   * Get Single Profile by ID
+   */
+  static async getProfileById(profileId: string) {
+    const profile = await JobSeekerProfile.findById(profileId).populate(
       "userId",
       "email role createdAt"
     );

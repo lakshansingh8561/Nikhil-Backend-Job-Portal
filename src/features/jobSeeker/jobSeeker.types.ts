@@ -24,3 +24,11 @@ export interface CreateJobSeekerProfileInput {
 
 export interface UpdateJobSeekerProfileInput
   extends Partial<CreateJobSeekerProfileInput> {}
+
+export interface JobSeekerQuery {
+  search?: string;
+  location?: string;
+  skill?: string;
+  page?: number;
+  limit?: number;
+}

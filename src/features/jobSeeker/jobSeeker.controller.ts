@@ -42,6 +42,37 @@ export class JobSeekerController {
   });
 
   /**
+   * Get All Candidate Profiles (Paginated)
+   */
+  static getAllProfiles = asyncHandler(async (req: Request, res: Response) => {
+    const data = await JobSeekerService.getAllProfiles(req.query as any);
+
+    res.status(HTTP_STATUS.OK).json(
+      new ApiResponse(
+        true,
+        JOB_SEEKER_MESSAGES.PROFILES_FETCHED,
+        data
+      )
+    );
+  });
+
+  /**
+   * Get Profile By ID
+   */
+  static getProfileById = asyncHandler(async (req: Request, res: Response) => {
+    const profileId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const profile = await JobSeekerService.getProfileById(profileId);
+
+    res.status(HTTP_STATUS.OK).json(
+      new ApiResponse(
+        true,
+        JOB_SEEKER_MESSAGES.PROFILE_FETCHED,
+        profile
+      )
+    );
+  });
+
+  /**
    * Update Profile
    */
   static updateProfile = asyncHandler(async (req: Request, res: Response) => {

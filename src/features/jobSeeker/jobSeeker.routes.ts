@@ -9,7 +9,13 @@ import { JobSeekerValidation } from "./jobSeeker.validation";
 const router = Router();
 
 /**
- * Create Profile
+ * Public Routes: Get All Candidates (Paginated) & Single Candidate Profile
+ */
+router.get("/all", JobSeekerController.getAllProfiles);
+router.get("/profile/:id", JobSeekerController.getProfileById);
+
+/**
+ * Authenticated Job Seeker Profile Routes
  */
 router.post(
   "/profile",
@@ -19,9 +25,6 @@ router.post(
   JobSeekerController.createProfile
 );
 
-/**
- * Get My Profile
- */
 router.get(
   "/profile",
   authenticate,
@@ -29,9 +32,6 @@ router.get(
   JobSeekerController.getProfile
 );
 
-/**
- * Update My Profile
- */
 router.put(
   "/profile",
   authenticate,
