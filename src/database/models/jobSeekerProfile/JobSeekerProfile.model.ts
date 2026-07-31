@@ -5,26 +5,20 @@ const educationSchema = new Schema(
   {
     institution: {
       type: String,
-      required: true,
       trim: true,
     },
 
     degree: {
       type: String,
-      required: true,
       trim: true,
     },
 
     fieldOfStudy: {
       type: String,
-      required: true,
       trim: true,
     },
 
-    startDate: {
-      type: Date,
-      required: true,
-    },
+    startDate: Date,
 
     endDate: Date,
 
@@ -42,26 +36,21 @@ const experienceSchema = new Schema(
   {
     company: {
       type: String,
-      required: true,
       trim: true,
     },
 
     designation: {
       type: String,
-      required: true,
       trim: true,
     },
 
     employmentType: {
       type: String,
-      required: true,
+      default: "FULL_TIME",
       trim: true,
     },
 
-    startDate: {
-      type: Date,
-      required: true,
-    },
+    startDate: Date,
 
     endDate: Date,
 

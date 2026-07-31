@@ -2,8 +2,6 @@ import { Router } from "express";
 import { AdminController } from "./admin.controller";
 import { authenticate } from "../../common/middlewares/auth.middleware";
 import { authorize } from "../../common/middlewares/role.middleware";
-import { validate } from "../../common/middlewares/validate.middleware";
-import { AdminValidation } from "./admin.validation";
 import { Role } from "../../common/enums";
 
 const router = Router();
@@ -73,6 +71,19 @@ router.delete(
   authenticate,
   authorize(Role.ADMIN),
   AdminController.deleteJob
+);
+
+/*
+|--------------------------------------------------------------------------
+| Application Moderation
+|--------------------------------------------------------------------------
+*/
+
+router.get(
+  "/applications",
+  authenticate,
+  authorize(Role.ADMIN),
+  AdminController.getAllApplications
 );
 
 export default router;

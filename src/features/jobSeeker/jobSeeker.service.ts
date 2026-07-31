@@ -44,9 +44,11 @@ export class JobSeekerService {
       );
     }
 
+    const sanitizedPayload = sanitizeProfilePayload(payload);
+
     const profile = await JobSeekerProfile.create({
       userId,
-      ...payload,
+      ...sanitizedPayload,
     });
 
     return profile;
@@ -144,13 +146,15 @@ export class JobSeekerService {
     userId: string,
     payload: UpdateJobSeekerProfileInput
   ) {
+    const sanitizedPayload = sanitizeProfilePayload(payload);
+
     const profile =
       await JobSeekerProfile.findOneAndUpdate(
         {
           userId,
         },
         {
-          $set: payload,
+          $set: sanitizedPayload,
         },
         {
           new: true,
@@ -171,3 +175,43 @@ export class JobSeekerService {
     return profile;
   }
 }
+
+const sanitizeProfilePayload = (payload: any) => {
+  const sanitized = { ...payload };
+
+  if (Array.isArray(sanitized.education)) {
+    sanitized.education = sanitized.education
+      .filter(
+        (edu: any) =>
+          (edu.institution && edu.institution.trim() !== "") ||
+          (edu.degree && edu.degree.trim() !== "")
+      )
+      .map((edu: any) => {
+        const item = { ...edu };
+        if (!item.startDate || item.startDate === "") delete item.startDate;
+        else item.startDate = new Date(item.startDate);
+        if (!item.endDate || item.endDate === "") delete item.endDate;
+        else item.endDate = new Date(item.endDate);
+        return item;
+      });
+  }
+
+  if (Array.isArray(sanitized.experience)) {
+    sanitized.experience = sanitized.experience
+      .filter(
+        (exp: any) =>
+          (exp.company && exp.company.trim() !== "") ||
+          (exp.designation && exp.designation.trim() !== "")
+      )
+      .map((exp: any) => {
+        const item = { ...exp };
+        if (!item.startDate || item.startDate === "") delete item.startDate;
+        else item.startDate = new Date(item.startDate);
+        if (!item.endDate || item.endDate === "") delete item.endDate;
+        else item.endDate = new Date(item.endDate);
+        return item;
+      });
+  }
+
+  return sanitized;
+};

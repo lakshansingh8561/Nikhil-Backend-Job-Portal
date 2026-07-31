@@ -31,6 +31,12 @@ export interface JobQuery {
 
   experienceLevel?: ExperienceLevel;
 
+  salaryMin?: number;
+
+  salaryMax?: number;
+
+  skills?: string | string[];
+
   page?: number;
 
   limit?: number;

@@ -21,14 +21,14 @@ export class AdminController {
   );
 
   static getAllUsers = asyncHandler(
-    async (_req: Request, res: Response) => {
-      const users = await AdminService.getAllUsers();
+    async (req: Request, res: Response) => {
+      const usersData = await AdminService.getAllUsers(req.query as any);
 
       res.status(HTTP_STATUS.OK).json(
         new ApiResponse(
           true,
           ADMIN_MESSAGES.USERS_FETCHED,
-          users
+          usersData
         )
       );
     }
@@ -83,14 +83,14 @@ export class AdminController {
   );
 
   static getAllJobs = asyncHandler(
-    async (_req: Request, res: Response) => {
-      const jobs = await AdminService.getAllJobs();
+    async (req: Request, res: Response) => {
+      const jobsData = await AdminService.getAllJobs(req.query as any);
 
       res.status(HTTP_STATUS.OK).json(
         new ApiResponse(
           true,
           ADMIN_MESSAGES.JOBS_FETCHED,
-          jobs
+          jobsData
         )
       );
     }
@@ -106,6 +106,22 @@ export class AdminController {
         new ApiResponse(
           true,
           ADMIN_MESSAGES.JOB_DELETED
+        )
+      );
+    }
+  );
+
+  static getAllApplications = asyncHandler(
+    async (req: Request, res: Response) => {
+      const applicationsData = await AdminService.getAllApplications(
+        req.query as any
+      );
+
+      res.status(HTTP_STATUS.OK).json(
+        new ApiResponse(
+          true,
+          "Applications fetched successfully",
+          applicationsData
         )
       );
     }

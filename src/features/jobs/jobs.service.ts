@@ -39,13 +39,15 @@ export class JobService {
     };
 
     if (query.search) {
-      filter.$text = {
-        $search: query.search,
-      };
+      filter.$or = [
+        { title: { $regex: query.search, $options: "i" } },
+        { description: { $regex: query.search, $options: "i" } },
+        { skills: { $in: [new RegExp(query.search, "i")] } },
+      ];
     }
 
     if (query.location) {
-      filter.location = query.location;
+      filter.location = { $regex: query.location, $options: "i" };
     }
 
     if (query.employmentType) {
@@ -54,6 +56,23 @@ export class JobService {
 
     if (query.experienceLevel) {
       filter.experienceLevel = query.experienceLevel;
+    }
+
+    if (query.salaryMin) {
+      filter.salaryMin = { $gte: Number(query.salaryMin) };
+    }
+
+    if (query.salaryMax) {
+      filter.salaryMax = { $lte: Number(query.salaryMax) };
+    }
+
+    if (query.skills) {
+      const skillsArr = Array.isArray(query.skills)
+        ? query.skills
+        : [query.skills];
+      filter.skills = {
+        $in: skillsArr.map((s) => new RegExp(s, "i")),
+      };
     }
 
     const page = Number(query.page) || 1;
