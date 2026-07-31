@@ -6,6 +6,7 @@ import { RECRUITER_MESSAGES } from "./recruiter.constants";
 import {
   CreateRecruiterProfileInput,
   UpdateRecruiterProfileInput,
+  RecruiterQuery,
 } from "./recruiter.types";
 
 export class RecruiterService {
@@ -63,6 +64,50 @@ export class RecruiterService {
     }
 
     return profile;
+  }
+
+  static async getAllRecruiters(query: RecruiterQuery) {
+    const filter: any = {};
+
+    if (query.search) {
+      filter.$or = [
+        { firstName: { $regex: query.search, $options: "i" } },
+        { lastName: { $regex: query.search, $options: "i" } },
+        { currentCompany: { $regex: query.search, $options: "i" } },
+        { designation: { $regex: query.search, $options: "i" } },
+      ];
+    }
+
+    if (query.letter) {
+      filter.currentCompany = { $regex: `^${query.letter}`, $options: "i" };
+    }
+
+    if (query.location) {
+      filter.currentLocation = { $regex: query.location, $options: "i" };
+    }
+
+    const page = Number(query.page) || 1;
+    const limit = Number(query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const recruiters = await RecruiterProfile.find(filter)
+      .populate("userId", "email role")
+      .populate("companyId")
+      .skip(skip)
+      .limit(limit)
+      .sort({ createdAt: -1 });
+
+    const total = await RecruiterProfile.countDocuments(filter);
+
+    return {
+      recruiters,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit),
+      },
+    };
   }
 
   static async updateProfile(

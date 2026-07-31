@@ -9,15 +9,19 @@ export interface ICompany extends Document {
 
   description?: string;
 
+  mission?: string;
+
+  vision?: string;
+
   industry: string;
 
   companySize: string;
 
   website?: string;
 
-  email: string;
+  email?: string;
 
-  phone: string;
+  phone?: string;
 
   logo?: string;
 
@@ -27,6 +31,8 @@ export interface ICompany extends Document {
 
   headquarters?: string;
 
+  address?: string;
+
   city?: string;
 
   state?: string;
@@ -35,9 +41,17 @@ export interface ICompany extends Document {
 
   linkedin?: string;
 
+  facebook?: string;
+
   twitter?: string;
 
-  facebook?: string;
+  instagram?: string;
+
+  github?: string;
+
+  youtube?: string;
+
+  officeImages?: string[];
 
   isVerified: boolean;
 

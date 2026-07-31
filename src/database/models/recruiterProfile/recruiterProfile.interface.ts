@@ -10,7 +10,21 @@ export interface IRecruiterProfile extends Document {
 
   designation: string;
 
+  currentCompany?: string;
+
+  experience?: number;
+
+  currentLocation?: string;
+
+  headline?: string;
+
+  bio?: string;
+
   linkedin?: string;
+
+  github?: string;
+
+  portfolio?: string;
 
   profilePicture?: string;
 

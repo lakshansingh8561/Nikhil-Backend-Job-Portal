@@ -36,11 +36,12 @@ export class CompanyController {
   });
 
   static updateCompany = asyncHandler(async (req: Request, res: Response) => {
- const company = await CompanyService.updateCompany(
-  req.user.userId,
-  req.params.id as string,
-  req.body
-);
+    const companyId = req.params.id ? (Array.isArray(req.params.id) ? req.params.id[0] : req.params.id) : undefined;
+    const company = await CompanyService.updateCompany(
+      req.user.userId,
+      companyId,
+      req.body
+    );
 
     res.status(HTTP_STATUS.OK).json(
       new ApiResponse(

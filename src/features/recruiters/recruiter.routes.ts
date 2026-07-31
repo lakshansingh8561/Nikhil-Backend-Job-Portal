@@ -8,6 +8,14 @@ import { Role } from "../../common/enums";
 
 const router = Router();
 
+/**
+ * Public Routes: Paginated Recruiters / Companies List
+ */
+router.get("/all", RecruiterController.getAllRecruiters);
+
+/**
+ * Authenticated Recruiter Profile Routes
+ */
 router.post(
   "/profile",
   authenticate,

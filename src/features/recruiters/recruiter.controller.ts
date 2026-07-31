@@ -35,6 +35,18 @@ export class RecruiterController {
     );
   });
 
+  static getAllRecruiters = asyncHandler(async (req: Request, res: Response) => {
+    const data = await RecruiterService.getAllRecruiters(req.query as any);
+
+    res.status(HTTP_STATUS.OK).json(
+      new ApiResponse(
+        true,
+        RECRUITER_MESSAGES.PROFILES_FETCHED || "Recruiters fetched successfully.",
+        data
+      )
+    );
+  });
+
   static updateProfile = asyncHandler(async (req: Request, res: Response) => {
     const profile = await RecruiterService.updateProfile(
       req.user.userId,

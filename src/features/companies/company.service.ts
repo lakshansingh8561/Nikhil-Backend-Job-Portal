@@ -29,15 +29,19 @@ export class CompanyService {
       );
     }
 
-    const recruiterProfile = await RecruiterProfile.findOne({
+    let recruiterProfile = await RecruiterProfile.findOne({
       userId,
     });
 
     if (!recruiterProfile) {
-      throw new ApiError(
-        HTTP_STATUS.BAD_REQUEST,
-        "Please create your recruiter profile first."
-      );
+      // Auto-create basic recruiter profile if not exists
+      recruiterProfile = await RecruiterProfile.create({
+        userId,
+        firstName: user.email.split("@")[0],
+        lastName: "Recruiter",
+        phone: payload.phone || "0000000000",
+        designation: "Recruiter",
+      });
     }
 
     const existingCompany = await Company.findOne({
@@ -45,21 +49,10 @@ export class CompanyService {
     });
 
     if (existingCompany) {
-      throw new ApiError(
-        HTTP_STATUS.CONFLICT,
-        COMPANY_MESSAGES.COMPANY_ALREADY_EXISTS
-      );
-    }
-
-    const companyNameExists = await Company.findOne({
-      companyName: payload.companyName,
-    });
-
-    if (companyNameExists) {
-      throw new ApiError(
-        HTTP_STATUS.CONFLICT,
-        "Company name already exists."
-      );
+      // If already exists, update it instead of error
+      Object.assign(existingCompany, payload);
+      await existingCompany.save();
+      return existingCompany;
     }
 
     const company = await Company.create({
@@ -90,23 +83,33 @@ export class CompanyService {
 
   static async updateCompany(
     userId: string,
-    companyId: string,
+    companyId: string | undefined,
     payload: UpdateCompanyInput
   ) {
-    const company = await Company.findOne({
-      _id: companyId,
-      ownerId: userId,
-    });
+    const filter: any = { ownerId: userId };
+    if (companyId && companyId !== "my") {
+      filter._id = companyId;
+    }
+
+    let company = await Company.findOne(filter);
 
     if (!company) {
-      throw new ApiError(
-        HTTP_STATUS.NOT_FOUND,
-        COMPANY_MESSAGES.COMPANY_NOT_FOUND
-      );
+      // Create new company if updating non-existent company
+      company = await Company.create({
+        ownerId: userId,
+        ...payload,
+      });
+
+      const recruiterProfile = await RecruiterProfile.findOne({ userId });
+      if (recruiterProfile) {
+        recruiterProfile.companyId = company._id;
+        await recruiterProfile.save();
+      }
+
+      return company;
     }
 
     Object.assign(company, payload);
-
     await company.save();
 
     return company;

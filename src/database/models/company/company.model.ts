@@ -7,13 +7,11 @@ const companySchema = new Schema<ICompany>(
       type: Schema.Types.ObjectId,
       ref: "User",
       required: true,
-      unique: true,
     },
 
     companyName: {
       type: String,
       required: true,
-      unique: true,
       trim: true,
     },
 
@@ -27,9 +25,20 @@ const companySchema = new Schema<ICompany>(
       default: "",
     },
 
+    mission: {
+      type: String,
+      default: "",
+    },
+
+    vision: {
+      type: String,
+      default: "",
+    },
+
     industry: {
       type: String,
       required: true,
+      trim: true,
     },
 
     companySize: {
@@ -44,14 +53,12 @@ const companySchema = new Schema<ICompany>(
 
     email: {
       type: String,
-      required: true,
-      lowercase: true,
-      trim: true,
+      default: "",
     },
 
     phone: {
       type: String,
-      required: true,
+      default: "",
     },
 
     logo: {
@@ -64,21 +71,69 @@ const companySchema = new Schema<ICompany>(
       default: "",
     },
 
-    foundedYear: Number,
+    foundedYear: {
+      type: Number,
+    },
 
-    headquarters: String,
+    headquarters: {
+      type: String,
+      default: "",
+    },
 
-    city: String,
+    address: {
+      type: String,
+      default: "",
+    },
 
-    state: String,
+    city: {
+      type: String,
+      default: "",
+    },
 
-    country: String,
+    state: {
+      type: String,
+      default: "",
+    },
 
-    linkedin: String,
+    country: {
+      type: String,
+      default: "",
+    },
 
-    twitter: String,
+    linkedin: {
+      type: String,
+      default: "",
+    },
 
-    facebook: String,
+    facebook: {
+      type: String,
+      default: "",
+    },
+
+    twitter: {
+      type: String,
+      default: "",
+    },
+
+    instagram: {
+      type: String,
+      default: "",
+    },
+
+    github: {
+      type: String,
+      default: "",
+    },
+
+    youtube: {
+      type: String,
+      default: "",
+    },
+
+    officeImages: {
+      type: [String],
+      default: [],
+    },
 
     isVerified: {
       type: Boolean,
@@ -90,10 +145,4 @@ const companySchema = new Schema<ICompany>(
   }
 );
 
-// companySchema.index({ companyName: 1 });
-// companySchema.index({ ownerId: 1 });
-
-export const Company = model<ICompany>(
-  "Company",
-  companySchema
-);
+export const Company = model<ICompany>("Company", companySchema);
