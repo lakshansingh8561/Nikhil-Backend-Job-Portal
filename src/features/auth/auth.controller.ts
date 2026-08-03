@@ -6,6 +6,19 @@ import { HTTP_STATUS } from "../../common/constants/httpStatus";
 import { AUTH_MESSAGES } from "./auth.constants";
 
 export class AuthController {
+  static googleAuth = asyncHandler(async (req: Request, res: Response) => {
+    const { credential, role } = req.body;
+    const data = await AuthService.googleAuth(credential, role);
+
+    res.status(HTTP_STATUS.OK).json(
+      new ApiResponse(
+        true,
+        "Google Authentication successful.",
+        data
+      )
+    );
+  });
+
   static register = asyncHandler(async (req: Request, res: Response) => {
     const data = await AuthService.register(req.body);
 

@@ -22,6 +22,11 @@ router.post(
   AuthController.login
 );
 
+router.post(
+  "/google",
+  AuthController.googleAuth
+);
+
 /**
  * Protected Routes
  */

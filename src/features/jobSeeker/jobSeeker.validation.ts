@@ -5,7 +5,7 @@ const createProfile = z.object({
 
   lastName: z.string().min(2).max(50),
 
-  phone: z.string().min(10).max(15),
+  phone: z.string().optional().or(z.literal("")),
 
   headline: z.string().optional(),
 

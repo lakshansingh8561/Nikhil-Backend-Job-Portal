@@ -21,6 +21,13 @@ export interface RecruiterQuery {
   search?: string;
   location?: string;
   letter?: string;
+  industry?: string;
+  salaryRange?: string;
+  position?: string;
+  experience?: string;
+  workplace?: string;
+  postedDate?: string;
+  type?: string;
   page?: number;
   limit?: number;
 }
