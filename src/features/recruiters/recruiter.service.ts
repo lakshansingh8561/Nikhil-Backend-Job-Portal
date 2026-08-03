@@ -75,6 +75,8 @@ export class RecruiterService {
         { lastName: { $regex: query.search, $options: "i" } },
         { currentCompany: { $regex: query.search, $options: "i" } },
         { designation: { $regex: query.search, $options: "i" } },
+        { bio: { $regex: query.search, $options: "i" } },
+        { headline: { $regex: query.search, $options: "i" } },
       ];
     }
 
@@ -84,6 +86,42 @@ export class RecruiterService {
 
     if (query.location) {
       filter.currentLocation = { $regex: query.location, $options: "i" };
+    }
+
+    if (query.industry) {
+      filter.$or = filter.$or || [];
+      filter.$or.push(
+        { designation: { $regex: query.industry, $options: "i" } },
+        { currentCompany: { $regex: query.industry, $options: "i" } },
+        { headline: { $regex: query.industry, $options: "i" } }
+      );
+    }
+
+    if (query.position) {
+      filter.designation = { $regex: query.position, $options: "i" };
+    }
+
+    if (query.experience) {
+      if (query.experience === "INTERNSHIP" || query.experience === "ENTRY") {
+        filter.experience = { $lte: 2 };
+      } else if (query.experience === "MID") {
+        filter.experience = { $gte: 2, $lte: 5 };
+      } else if (query.experience === "SENIOR") {
+        filter.experience = { $gte: 5, $lte: 10 };
+      } else if (query.experience === "EXECUTIVE") {
+        filter.experience = { $gte: 10 };
+      }
+    }
+
+    if (query.postedDate) {
+      const now = new Date();
+      if (query.postedDate === "24h") {
+        filter.createdAt = { $gte: new Date(now.getTime() - 24 * 60 * 60 * 1000) };
+      } else if (query.postedDate === "7d") {
+        filter.createdAt = { $gte: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000) };
+      } else if (query.postedDate === "30d") {
+        filter.createdAt = { $gte: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000) };
+      }
     }
 
     const page = Number(query.page) || 1;
@@ -105,7 +143,7 @@ export class RecruiterService {
         page,
         limit,
         total,
-        pages: Math.ceil(total / limit),
+        pages: Math.ceil(total / limit) || 1,
       },
     };
   }

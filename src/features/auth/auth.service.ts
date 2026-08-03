@@ -1,4 +1,4 @@
-import { User } from "../../database/models";
+import { User, JobSeekerProfile, RecruiterProfile } from "../../database/models";
 import { ApiError } from "../../common/utils/ApiError";
 import { HTTP_STATUS } from "../../common/constants/httpStatus";
 import { AUTH_MESSAGES } from "./auth.constants";
@@ -17,9 +17,91 @@ import {
   generateRefreshToken,
   verifyRefreshToken
 } from "../../common/utils/jwt";
-import { UserStatus } from "../../common/enums";
+import { UserStatus, Role } from "../../common/enums";
+import { OAuth2Client } from "google-auth-library";
+
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 export class AuthService {
+  static async googleAuth(credential: string, selectedRole?: string): Promise<AuthResponse> {
+    let payload;
+    try {
+      const ticket = await googleClient.verifyIdToken({
+        idToken: credential,
+        audience: process.env.GOOGLE_CLIENT_ID,
+      });
+      payload = ticket.getPayload();
+    } catch (err: any) {
+      throw new ApiError(HTTP_STATUS.UNAUTHORIZED, "Failed to verify Google token.");
+    }
+
+    if (!payload || !payload.email) {
+      throw new ApiError(HTTP_STATUS.UNAUTHORIZED, "Invalid Google account data.");
+    }
+
+    const email = payload.email.toLowerCase();
+    let user = await User.findOne({ email }).select("+refreshToken");
+
+    if (!user) {
+      const randomPassword = await hashPassword(Math.random().toString(36).slice(-10) + Date.now().toString());
+      const assignedRole = (selectedRole && Object.values(Role).includes(selectedRole as Role))
+        ? (selectedRole as Role)
+        : Role.JOB_SEEKER;
+
+      user = await User.create({
+        email,
+        password: randomPassword,
+        role: assignedRole,
+        isVerified: true,
+      });
+
+      if (user.role === Role.JOB_SEEKER) {
+        await JobSeekerProfile.create({
+          userId: user.id,
+          firstName: payload.given_name || "Google",
+          lastName: payload.family_name || "User",
+          profilePicture: payload.picture || "",
+        }).catch(() => null);
+      } else if (user.role === Role.RECRUITER) {
+        await RecruiterProfile.create({
+          userId: user.id,
+          firstName: payload.given_name || "Google",
+          lastName: payload.family_name || "Recruiter",
+          phone: "N/A",
+          designation: "Hiring Manager",
+          profilePicture: payload.picture || "",
+        }).catch(() => null);
+      }
+    }
+
+    if (user.status === UserStatus.BLOCKED) {
+      throw new ApiError(HTTP_STATUS.FORBIDDEN, AUTH_MESSAGES.USER_BLOCKED);
+    }
+
+    user.lastLogin = new Date();
+
+    const jwtPayload: JwtPayload = {
+      userId: user.id,
+      role: user.role,
+    };
+
+    const accessToken = generateAccessToken(jwtPayload);
+    const refreshToken = generateRefreshToken(jwtPayload);
+
+    user.refreshToken = refreshToken;
+    await user.save();
+
+    return {
+      accessToken,
+      refreshToken,
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+      },
+    };
+  }
+
   static async register(
     payload: RegisterUserInput
   ): Promise<AuthResponse> {

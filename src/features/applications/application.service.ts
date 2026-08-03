@@ -2,6 +2,7 @@ import {
   Application,
   Job,
   JobSeekerProfile,
+  User,
 } from "../../database/models";
 import { ApiError } from "../../common/utils/ApiError";
 import { HTTP_STATUS } from "../../common/constants/httpStatus";
@@ -10,6 +11,8 @@ import {
   ApplyJobInput,
   UpdateApplicationStatusInput,
 } from "./application.types";
+import { NotificationService } from "../notifications/notification.service";
+import { EmailService } from "../../common/services/email.service";
 
 export class ApplicationService {
   static async applyJob(
@@ -63,6 +66,33 @@ export class ApplicationService {
       coverLetter: payload.coverLetter,
     });
 
+    // Notify Recruiter via in-app Notification & SMTP Email!
+    if (job.recruiterId) {
+      const applicantUser = await User.findById(userId);
+      const recruiterUser = await User.findById(job.recruiterId);
+
+      const applicantFullName = `${profile.firstName || ""} ${profile.lastName || ""}`.trim() || applicantUser?.email?.split("@")[0] || "A candidate";
+
+      await NotificationService.createNotification({
+        recipientId: job.recruiterId.toString(),
+        senderId: userId,
+        type: "APPLICATION_SUBMITTED",
+        title: "New Applicant Received",
+        message: `${applicantFullName} applied for "${job.title}".`,
+        link: `/recruiter/jobs/${jobId}/applications`,
+      }).catch(() => null);
+
+      if (recruiterUser?.email) {
+        EmailService.sendApplicationSubmittedToRecruiter({
+          recruiterEmail: recruiterUser.email,
+          applicantName: applicantFullName,
+          applicantEmail: applicantUser?.email || "",
+          jobTitle: job.title,
+          coverLetter: payload.coverLetter,
+        }).catch((err) => console.error("Email send failed:", err));
+      }
+    }
+
     return application;
   }
 
@@ -97,13 +127,40 @@ export class ApplicationService {
       );
     }
 
-    return Application.find({
+    const applications = await Application.find({
       jobId,
     })
       .populate("applicantId")
       .sort({
         createdAt: -1,
       });
+
+    // Notify candidates that their application was viewed by recruiter (In-app + Email)
+    for (const app of applications) {
+      const applicantUserId = app.applicantId?._id || app.applicantId;
+      if (applicantUserId) {
+        NotificationService.createNotification({
+          recipientId: applicantUserId.toString(),
+          senderId: recruiterId,
+          type: "APPLICATION_VIEWED",
+          title: "Application Reviewed",
+          message: `Your application for "${job.title}" was reviewed by the recruiter.`,
+          link: "/job-seeker/applications",
+        }).catch(() => null);
+
+        User.findById(applicantUserId).then((applicantUser) => {
+          if (applicantUser?.email) {
+            EmailService.sendApplicationViewedToJobSeeker({
+              applicantEmail: applicantUser.email,
+              applicantName: applicantUser.email.split("@")[0],
+              jobTitle: job.title,
+            }).catch(() => null);
+          }
+        });
+      }
+    }
+
+    return applications;
   }
 
   static async updateStatus(
@@ -134,8 +191,50 @@ export class ApplicationService {
     }
 
     application.status = payload.status;
-
     await application.save();
+
+    // Fetch candidate details for notification and email
+    const applicantUser = await User.findById(application.applicantId);
+    const applicantProfile = await JobSeekerProfile.findOne({ userId: application.applicantId });
+    const applicantName = applicantProfile
+      ? `${applicantProfile.firstName || ""} ${applicantProfile.lastName || ""}`.trim() || applicantUser?.email?.split("@")[0] || "Candidate"
+      : applicantUser?.email?.split("@")[0] || "Candidate";
+
+    // Notify Job Seeker about status update!
+    let title = `Application Status Updated: ${payload.status}`;
+    let message = `Your application for "${job.title}" has been updated to ${payload.status}.`;
+
+    if (payload.status === "INTERVIEW") {
+      title = "Interview Invitation!";
+      message = `You have been selected for an interview for "${job.title}". Please prepare and check your application details.`;
+    } else if (payload.status === "SHORTLISTED") {
+      title = "Application Shortlisted!";
+      message = `Great news! Your profile has been shortlisted for "${job.title}".`;
+    } else if (payload.status === "HIRED") {
+      title = "Congratulations! You're Hired!";
+      message = `Congratulations! The hiring team selected you for "${job.title}".`;
+    } else if (payload.status === "REJECTED") {
+      title = "Application Update";
+      message = `Thank you for applying. Unfortunately, your application for "${job.title}" was not selected at this time.`;
+    }
+
+    await NotificationService.createNotification({
+      recipientId: application.applicantId.toString(),
+      senderId: recruiterId,
+      type: "STATUS_UPDATED",
+      title,
+      message,
+      link: "/job-seeker/applications",
+    }).catch(() => null);
+
+    if (applicantUser?.email) {
+      EmailService.sendStatusUpdateToJobSeeker({
+        applicantEmail: applicantUser.email,
+        applicantName,
+        jobTitle: job.title,
+        status: payload.status,
+      }).catch((err) => console.error("Status update email failed:", err));
+    }
 
     return application;
   }

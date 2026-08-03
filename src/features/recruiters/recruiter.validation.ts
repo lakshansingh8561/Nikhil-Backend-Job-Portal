@@ -3,7 +3,7 @@ import { z } from "zod";
 const createProfile = z.object({
   firstName: z.string().min(2).max(50),
   lastName: z.string().min(2).max(50),
-  phone: z.string().min(10).max(15),
+  phone: z.string().optional().or(z.literal("")),
   designation: z.string().min(2).max(100),
   currentCompany: z.string().optional(),
   experience: z.number().min(0).optional(),
