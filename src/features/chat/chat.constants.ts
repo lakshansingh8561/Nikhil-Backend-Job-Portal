@@ -1,0 +1,18 @@
+export const CHAT_MESSAGES = {
+  CONVERSATION_CREATED: "Conversation created successfully",
+  CONVERSATIONS_FETCHED: "Conversations fetched successfully",
+  CONVERSATION_FETCHED: "Conversation details fetched successfully",
+  MESSAGE_SENT: "Message sent successfully",
+  MESSAGES_FETCHED: "Messages fetched successfully",
+  MESSAGE_EDITED: "Message edited successfully",
+  MESSAGE_DELETED: "Message deleted successfully",
+  MESSAGES_MARKED_READ: "Messages marked as read",
+  UNREAD_COUNT_FETCHED: "Unread count fetched successfully",
+  ADMIN_CHAT_FORBIDDEN: "Admins are not allowed to participate in chat conversations",
+  APPLICATION_REQUIRED: "Job Seekers and Recruiters can only chat if an application exists for the job",
+  CONVERSATION_NOT_FOUND: "Conversation not found or access denied",
+  MESSAGE_NOT_FOUND: "Message not found or access denied",
+  CANNOT_EDIT_MESSAGE: "You can only edit your own text messages within 10 minutes of sending",
+  CANNOT_DELETE_MESSAGE: "You can only delete your own messages",
+  INVALID_PARTICIPANTS: "Invalid participants for chat conversation",
+};

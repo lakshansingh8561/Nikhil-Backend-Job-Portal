@@ -7,6 +7,8 @@ import { adminRoutes } from "../features/admin";
 import { recruiterRoutes } from "../features/recruiters";
 import { jobRoutes } from "../features/jobs";
 import notificationRoutes from "../features/notifications/notification.routes";
+import { chatRoutes } from "../features/chat";
+import { locationRoutes } from "../features/location";
 
 const router = Router();
 
@@ -18,5 +20,8 @@ router.use("/applications", applicationRoutes);
 router.use("/admin", adminRoutes);
 router.use("/jobs", jobRoutes);
 router.use("/notifications", notificationRoutes);
+router.use("/chat", chatRoutes);
+router.use("/location", locationRoutes);
 export default router;
+
 

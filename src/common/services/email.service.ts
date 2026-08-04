@@ -290,4 +290,89 @@ export class EmailService {
     `;
     return this.sendMail({ to: applicantEmail, subject, html });
   }
+
+  /**
+   * 4. Send email confirmation to Job Seeker when they apply for a job
+   */
+  public static async sendApplicationConfirmationToJobSeeker({
+    applicantEmail,
+    applicantName = "Candidate",
+    jobTitle,
+    companyName = "Hiring Company",
+  }: {
+    applicantEmail: string;
+    applicantName?: string;
+    jobTitle: string;
+    companyName?: string;
+  }) {
+    const subject = `✅ Application Confirmed: You applied for ${jobTitle} at ${companyName}`;
+    const formattedDate = new Date().toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f5f7fc; margin: 0; padding: 0; }
+          .container { max-width: 600px; margin: 30px auto; background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.08); border: 1px solid #eaeff7; }
+          .header { background: linear-gradient(135deg, #05264E 0%, #3C65F5 100%); padding: 36px 24px; text-align: center; color: #ffffff; }
+          .header-badge { display: inline-block; background: rgba(255,255,255,0.15); padding: 6px 14px; border-radius: 20px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; border: 1px solid rgba(255,255,255,0.2); }
+          .header h1 { margin: 0; font-size: 26px; font-weight: 800; letter-spacing: -0.5px; }
+          .header p { margin: 8px 0 0; font-size: 14px; opacity: 0.9; }
+          .content { padding: 32px 24px; color: #05264E; }
+          .greeting { font-size: 18px; font-weight: 700; margin-bottom: 16px; color: #05264E; }
+          .message { font-size: 14px; line-height: 1.6; color: #66789c; margin-bottom: 24px; }
+          .card { background: #f8fafc; border-radius: 14px; padding: 22px; border: 1px solid #eaeff7; margin-bottom: 24px; }
+          .card-title { font-size: 13px; font-weight: 800; color: #05264E; margin-bottom: 14px; border-bottom: 1px solid #eaeff7; padding-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+          .info-row { font-size: 13px; margin-bottom: 10px; color: #66789c; display: flex; justify-content: space-between; }
+          .info-row strong { color: #05264E; font-weight: 600; }
+          .status-pill { background: #E8F0FE; color: #3C65F5; font-weight: 700; padding: 3px 10px; border-radius: 8px; font-size: 12px; display: inline-block; }
+          .btn-container { text-align: center; margin: 32px 0 16px; }
+          .btn { background: #3C65F5; color: #ffffff !important; padding: 14px 32px; border-radius: 12px; font-size: 14px; font-weight: 700; text-decoration: none; display: inline-block; box-shadow: 0 4px 14px rgba(60,101,245,0.35); }
+          .footer { background: #f8fafc; padding: 20px; text-align: center; font-size: 12px; color: #94a3b8; border-top: 1px solid #eaeff7; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <div class="header-badge">Application Submitted</div>
+            <h1>JobBox Portal</h1>
+            <p>Your application was successfully sent!</p>
+          </div>
+          <div class="content">
+            <div class="greeting">Hi ${applicantName},</div>
+            <div class="message">
+              Thank you for applying! Your job application for <strong>${jobTitle}</strong> at <strong>${companyName}</strong> has been successfully submitted to the hiring team.
+            </div>
+            
+            <div class="card">
+              <div class="card-title">Application Summary</div>
+              <div class="info-row"><span>Position Applied:</span> <strong>${jobTitle}</strong></div>
+              <div class="info-row"><span>Company:</span> <strong>${companyName}</strong></div>
+              <div class="info-row"><span>Date Applied:</span> <strong>${formattedDate}</strong></div>
+              <div class="info-row"><span>Status:</span> <span class="status-pill">APPLIED</span></div>
+            </div>
+
+            <div class="message">
+              The hiring team will evaluate your resume and credentials. You can track your application status anytime from your JobBox candidate dashboard.
+            </div>
+
+            <div class="btn-container">
+              <a href="http://localhost:5173/job-seeker/applications" class="btn">View My Application</a>
+            </div>
+          </div>
+          <div class="footer">
+            © ${new Date().getFullYear()} JobBox Recruitment Platform. All rights reserved.
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+    return this.sendMail({ to: applicantEmail, subject, html });
+  }
 }

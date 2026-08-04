@@ -1,4 +1,4 @@
-import { RecruiterProfile, User } from "../../database/models";
+import { RecruiterProfile, User, Job } from "../../database/models";
 import { ApiError } from "../../common/utils/ApiError";
 import { HTTP_STATUS } from "../../common/constants/httpStatus";
 import { Role } from "../../common/enums";
@@ -137,8 +137,24 @@ export class RecruiterService {
 
     const total = await RecruiterProfile.countDocuments(filter);
 
+    // Compute real open jobs count for each recruiter
+    const recruitersWithJobs = await Promise.all(
+      recruiters.map(async (rec) => {
+        const recObj = rec.toObject();
+        const recUserId = typeof rec.userId === "object" && rec.userId !== null ? (rec.userId as any)._id : rec.userId;
+        const openJobsCount = await Job.countDocuments({
+          recruiterId: recUserId,
+          isActive: true,
+        });
+        return {
+          ...recObj,
+          openJobsCount,
+        };
+      })
+    );
+
     return {
-      recruiters,
+      recruiters: recruitersWithJobs,
       pagination: {
         page,
         limit,

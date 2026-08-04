@@ -44,7 +44,16 @@ const userSchema = new Schema<IUser>(
       type: String,
       default: null,
       select: false,
-    }
+    },
+
+    location: {
+      city: { type: String, default: "" },
+      state: { type: String, default: "" },
+      country: { type: String, default: "" },
+      postalCode: { type: String, default: "" },
+      latitude: { type: Number, default: 0 },
+      longitude: { type: Number, default: 0 },
+    },
   },
   {
     timestamps: true,

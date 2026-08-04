@@ -5,3 +5,4 @@ export * from "./jobSeekerProfile";
 export * from "./recruiterProfile";
 export * from "./application";
 export * from "./notification";
+export * from "./chat";
