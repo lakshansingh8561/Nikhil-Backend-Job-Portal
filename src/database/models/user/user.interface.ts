@@ -15,7 +15,15 @@ export interface IUser extends Document {
   lastLogin?: Date;
 
   refreshToken?: string | null;
-  
+  location?: {
+    city?: string;
+    state?: string;
+    country?: string;
+    postalCode?: string;
+    latitude?: number;
+    longitude?: number;
+  };
+
   createdAt: Date;
 
   updatedAt: Date;

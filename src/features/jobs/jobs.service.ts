@@ -38,12 +38,29 @@ export class JobService {
       isActive: true,
     };
 
+    if (query.recruiterId) {
+      filter.recruiterId = query.recruiterId;
+    }
+
+    if (query.companyId) {
+      filter.companyId = query.companyId;
+    }
+
     if (query.search) {
+      const matchingCompanies = await Company.find({
+        companyName: { $regex: query.search, $options: "i" },
+      }).select("_id");
+      const companyIds = matchingCompanies.map((c) => c._id);
+
       filter.$or = [
         { title: { $regex: query.search, $options: "i" } },
         { description: { $regex: query.search, $options: "i" } },
         { skills: { $in: [new RegExp(query.search, "i")] } },
       ];
+
+      if (companyIds.length > 0) {
+        filter.$or.push({ companyId: { $in: companyIds } });
+      }
     }
 
     if (query.location) {

@@ -37,6 +37,10 @@ export interface JobQuery {
 
   skills?: string | string[];
 
+  recruiterId?: string;
+
+  companyId?: string;
+
   page?: number;
 
   limit?: number;

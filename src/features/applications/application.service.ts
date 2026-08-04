@@ -31,7 +31,7 @@ export class ApplicationService {
       );
     }
 
-    const job = await Job.findById(jobId);
+    const job = await Job.findById(jobId).populate("companyId");
 
     if (!job || !job.isActive) {
       throw new ApiError(
@@ -66,12 +66,23 @@ export class ApplicationService {
       coverLetter: payload.coverLetter,
     });
 
-    // Notify Recruiter via in-app Notification & SMTP Email!
-    if (job.recruiterId) {
-      const applicantUser = await User.findById(userId);
-      const recruiterUser = await User.findById(job.recruiterId);
+    const applicantUser = await User.findById(userId);
+    const applicantFullName = `${profile.firstName || ""} ${profile.lastName || ""}`.trim() || applicantUser?.email?.split("@")[0] || "Candidate";
+    const companyName = (job.companyId as any)?.companyName || "Hiring Company";
 
-      const applicantFullName = `${profile.firstName || ""} ${profile.lastName || ""}`.trim() || applicantUser?.email?.split("@")[0] || "A candidate";
+    // 1. Send confirmation email to Job Seeker (Applicant)
+    if (applicantUser?.email) {
+      EmailService.sendApplicationConfirmationToJobSeeker({
+        applicantEmail: applicantUser.email,
+        applicantName: applicantFullName,
+        jobTitle: job.title,
+        companyName,
+      }).catch((err) => console.error("Job seeker confirmation email failed:", err));
+    }
+
+    // 2. Notify Recruiter via in-app Notification & SMTP Email
+    if (job.recruiterId) {
+      const recruiterUser = await User.findById(job.recruiterId);
 
       await NotificationService.createNotification({
         recipientId: job.recruiterId.toString(),
@@ -88,8 +99,9 @@ export class ApplicationService {
           applicantName: applicantFullName,
           applicantEmail: applicantUser?.email || "",
           jobTitle: job.title,
+          companyName,
           coverLetter: payload.coverLetter,
-        }).catch((err) => console.error("Email send failed:", err));
+        }).catch((err) => console.error("Recruiter email send failed:", err));
       }
     }
 
@@ -109,6 +121,54 @@ export class ApplicationService {
       .sort({
         createdAt: -1,
       });
+  }
+
+  static async getRecruiterAllApplications(recruiterId: string) {
+    const recruiterJobs = await Job.find({ recruiterId }).select("_id");
+    const jobIds = recruiterJobs.map((j) => j._id);
+
+    const applications = await Application.find({ jobId: { $in: jobIds } })
+      .populate("jobId", "title location companyId")
+      .populate("applicantId", "email role")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const result = await Promise.all(
+      applications.map(async (app) => {
+        const applicantUserId =
+          typeof app.applicantId === "object" && app.applicantId !== null
+            ? (app.applicantId as any)._id
+            : app.applicantId;
+
+        const profile = await JobSeekerProfile.findOne({
+          userId: applicantUserId,
+        }).lean();
+
+        const applicantUser =
+          typeof app.applicantId === "object" && app.applicantId !== null
+            ? (app.applicantId as any)
+            : null;
+
+        return {
+          ...app,
+          applicantProfile: profile
+            ? {
+                firstName: profile.firstName,
+                lastName: profile.lastName,
+                profilePicture: profile.profilePicture || "",
+                headline: profile.headline || "",
+              }
+            : {
+                firstName: applicantUser?.email ? applicantUser.email.split("@")[0] : "Applicant",
+                lastName: "",
+                profilePicture: "",
+                headline: "",
+              },
+        };
+      })
+    );
+
+    return result;
   }
 
   static async getApplicationsForJob(

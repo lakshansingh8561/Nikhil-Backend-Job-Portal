@@ -41,6 +41,23 @@ export class ApplicationController {
     }
   );
 
+  static getRecruiterAllApplications = asyncHandler(
+    async (req: Request, res: Response) => {
+      const applications =
+        await ApplicationService.getRecruiterAllApplications(
+          req.user.userId
+        );
+
+      res.status(HTTP_STATUS.OK).json(
+        new ApiResponse(
+          true,
+          APPLICATION_MESSAGES.APPLICATIONS_FETCHED,
+          applications
+        )
+      );
+    }
+  );
+
   static getApplicationsForJob = asyncHandler(
     async (req: Request, res: Response) => {
       const applications =

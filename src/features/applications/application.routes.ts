@@ -24,6 +24,13 @@ router.get(
   ApplicationController.getMyApplications
 );
 
+router.get(
+  "/recruiter/all",
+  authenticate,
+  authorize(Role.RECRUITER),
+  ApplicationController.getRecruiterAllApplications
+);
+
 
 
 router.get(
