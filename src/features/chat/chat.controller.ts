@@ -4,6 +4,8 @@ import { ApiResponse } from "../../common/utils/ApiResponse";
 import { HTTP_STATUS } from "../../common/constants/httpStatus";
 import { ChatService } from "./chat.service";
 import { CHAT_MESSAGES } from "./chat.constants";
+import { getIO, getOnlineUsers } from "../../socket";
+import { Message } from "../../database/models";
 
 export class ChatController {
   static createOrGetConversation = asyncHandler(
@@ -84,6 +86,59 @@ export class ChatController {
         req.body
       );
 
+      try {
+        const io = getIO();
+        const conversationId = req.params.id as string;
+        const receiverId = (message.receiver as any)?.toString();
+        const onlineUsersMap = getOnlineUsers();
+
+        const isReceiverOnline =
+          receiverId &&
+          onlineUsersMap.has(receiverId) &&
+          onlineUsersMap.get(receiverId)!.size > 0;
+
+        if (isReceiverOnline) {
+          const now = new Date();
+          await Message.findByIdAndUpdate(message._id || message.id, {
+            status: "delivered",
+            delivered: true,
+            deliveredAt: now,
+          });
+          (message as any).status = "delivered";
+          (message as any).delivered = true;
+          (message as any).deliveredAt = now;
+        }
+
+        if (io) {
+          const convRoom1 = `conversation:${conversationId}`;
+          const convRoom2 = `conversation_${conversationId}`;
+
+          io.to(convRoom1).to(convRoom2).emit("receive-message", message);
+          io.to(convRoom1).to(convRoom2).emit("receive_message", message);
+
+          if (receiverId) {
+            io.to(`user:${receiverId}`).emit("conversation-updated", {
+              conversationId,
+              message,
+            });
+            io.to(`user:${receiverId}`).emit("conversation_updated", {
+              conversationId,
+              message,
+            });
+          }
+          io.to(`user:${req.user.userId}`).emit("conversation-updated", {
+            conversationId,
+            message,
+          });
+          io.to(`user:${req.user.userId}`).emit("conversation_updated", {
+            conversationId,
+            message,
+          });
+        }
+      } catch (err) {
+        console.warn("Socket broadcast warning in sendMessage:", err);
+      }
+
       res.status(HTTP_STATUS.CREATED).json(
         new ApiResponse(
           true,
@@ -102,6 +157,17 @@ export class ChatController {
         req.body
       );
 
+      try {
+        const io = getIO();
+        if (io) {
+          const conversationId = (message.conversationId as any)?.toString() || req.params.id;
+          io.to(`conversation:${conversationId}`).emit("message_edited", message);
+          io.to(`conversation:${conversationId}`).emit("receive_message", message);
+        }
+      } catch (err) {
+        console.warn("Socket broadcast warning in editMessage:", err);
+      }
+
       res.status(HTTP_STATUS.OK).json(
         new ApiResponse(
           true,
@@ -119,6 +185,17 @@ export class ChatController {
         req.params.id as string
       );
 
+      try {
+        const io = getIO();
+        if (io) {
+          const conversationId = (message.conversationId as any)?.toString() || req.params.id;
+          io.to(`conversation:${conversationId}`).emit("message_deleted", message);
+          io.to(`conversation:${conversationId}`).emit("receive_message", message);
+        }
+      } catch (err) {
+        console.warn("Socket broadcast warning in deleteMessage:", err);
+      }
+
       res.status(HTTP_STATUS.OK).json(
         new ApiResponse(
           true,
@@ -135,6 +212,20 @@ export class ChatController {
         req.user.userId,
         req.params.id as string
       );
+
+      try {
+        const io = getIO();
+        if (io) {
+          const conversationId = req.params.id as string;
+          io.to(`conversation:${conversationId}`).emit("message_read", {
+            conversationId,
+            readBy: req.user.userId,
+            readAt: new Date(),
+          });
+        }
+      } catch (err) {
+        console.warn("Socket broadcast warning in markAsRead:", err);
+      }
 
       res.status(HTTP_STATUS.OK).json(
         new ApiResponse(

@@ -50,12 +50,28 @@ const messageSchema = new Schema<IMessage>(
       default: [],
     },
 
+    status: {
+      type: String,
+      enum: ["sent", "delivered", "seen"],
+      default: "sent",
+    },
+
+    sentAt: {
+      type: Date,
+      default: Date.now,
+    },
+
     read: {
       type: Boolean,
       default: false,
     },
 
     readAt: {
+      type: Date,
+      default: null,
+    },
+
+    seenAt: {
       type: Date,
       default: null,
     },

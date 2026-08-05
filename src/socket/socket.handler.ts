@@ -3,7 +3,7 @@ import { AuthenticatedSocket } from "./socket.auth.middleware";
 import { ChatService } from "../features/chat/chat.service";
 import { Conversation, Message } from "../database/models";
 
-// Track active online sockets per userId: Map<userId, Set<socketId>>
+// Active online user sockets: Map<userId, Set<socketId>>
 const onlineUsers = new Map<string, Set<string>>();
 
 export const setupSocketHandlers = (io: Server) => {
@@ -25,15 +25,17 @@ export const setupSocketHandlers = (io: Server) => {
     // Join personal user room for direct messaging & notifications
     socket.join(`user:${userId}`);
 
-    // Send current list of all online user IDs to newly connected socket
-    socket.emit("initial_online_users", Array.from(onlineUsers.keys()));
-
-    // Broadcast online status to all user's conversation recipients
+    // Broadcast updated list of online user IDs to all sockets
+    const currentOnlineUserIds = Array.from(onlineUsers.keys());
+    io.emit("online-users", currentOnlineUserIds);
+    io.emit("online_users", currentOnlineUserIds);
     socket.broadcast.emit("user_online", { userId });
 
-    // Handle join conversation room
-    socket.on("join_conversation", async (data: { conversationId: string }) => {
+    // Join Conversation Room
+    const handleJoinConversation = async (data: { conversationId: string }) => {
       try {
+        if (!data.conversationId) return;
+
         const conversation = await Conversation.findOne({
           _id: data.conversationId,
           participants: userId,
@@ -44,9 +46,11 @@ export const setupSocketHandlers = (io: Server) => {
           return;
         }
 
+        // Join both room patterns
         socket.join(`conversation:${data.conversationId}`);
+        socket.join(`conversation_${data.conversationId}`);
 
-        // Check online status of other participant
+        // Check if other participant is online
         const otherParticipantId = conversation.participants
           .find((p) => p.toString() !== userId)
           ?.toString();
@@ -63,149 +67,206 @@ export const setupSocketHandlers = (io: Server) => {
       } catch (err: any) {
         socket.emit("error", { message: err.message || "Failed to join conversation" });
       }
-    });
+    };
 
-    // Handle leave conversation room
-    socket.on("leave_conversation", (data: { conversationId: string }) => {
+    socket.on("join-conversation", handleJoinConversation);
+    socket.on("join_conversation", handleJoinConversation);
+
+    // Leave Conversation Room
+    const handleLeaveConversation = (data: { conversationId: string }) => {
+      if (!data.conversationId) return;
       socket.leave(`conversation:${data.conversationId}`);
-    });
+      socket.leave(`conversation_${data.conversationId}`);
+    };
 
-    // Handle send message
-    socket.on(
-      "send_message",
-      async (data: {
-        conversationId: string;
-        message: string;
-        messageType?: "text" | "image" | "file";
-        attachments?: any[];
-        replyTo?: string;
-      }) => {
-        try {
-          const message = await ChatService.sendMessage(
-            userId,
-            data.conversationId,
-            {
-              message: data.message,
-              messageType: data.messageType,
-              attachments: data.attachments,
-              replyTo: data.replyTo,
-            }
-          );
+    socket.on("leave-conversation", handleLeaveConversation);
+    socket.on("leave_conversation", handleLeaveConversation);
 
-          // Emit to recipient's personal user room so recipient updates conversation list/unread count
-          const receiverId = (message.receiver as any)?.toString();
-          if (receiverId) {
-            const isReceiverOnline =
-              onlineUsers.has(receiverId) &&
-              onlineUsers.get(receiverId)!.size > 0;
+    // Send Message
+    const handleSendMessage = async (data: {
+      conversationId: string;
+      message: string;
+      messageType?: "text" | "image" | "file";
+      attachments?: any[];
+      replyTo?: string;
+    }) => {
+      try {
+        const message = await ChatService.sendMessage(
+          userId,
+          data.conversationId,
+          {
+            message: data.message,
+            messageType: data.messageType,
+            attachments: data.attachments,
+            replyTo: data.replyTo,
+          }
+        );
 
-            if (isReceiverOnline) {
-              await Message.findByIdAndUpdate(message._id || message.id, {
+        const receiverId = (message.receiver as any)?.toString();
+        let isReceiverOnline = false;
+
+        if (receiverId) {
+          isReceiverOnline =
+            onlineUsers.has(receiverId) &&
+            onlineUsers.get(receiverId)!.size > 0;
+
+          if (isReceiverOnline) {
+            // Update message status to delivered immediately
+            const updated = await Message.findByIdAndUpdate(
+              message._id || message.id,
+              {
+                status: "delivered",
                 delivered: true,
                 deliveredAt: new Date(),
-              });
-              (message as any).delivered = true;
-              (message as any).deliveredAt = new Date();
-            }
+              },
+              { new: true }
+            ).lean();
 
-            io.to(`user:${receiverId}`).emit("conversation_updated", {
-              conversationId: data.conversationId,
-              message,
-            });
+            if (updated) {
+              (message as any).status = "delivered";
+              (message as any).delivered = true;
+              (message as any).deliveredAt = updated.deliveredAt;
+            }
           }
 
-          // Broadcast to conversation room with updated delivery status
-          io.to(`conversation:${data.conversationId}`).emit(
-            "receive_message",
-            message
-          );
-
-
-          // Also notify sender
-          io.to(`user:${userId}`).emit("conversation_updated", {
+          // Emit real-time notification & conversation updates to receiver's user room
+          io.to(`user:${receiverId}`).emit("conversation-updated", {
             conversationId: data.conversationId,
             message,
           });
-        } catch (err: any) {
-          socket.emit("error", {
-            message: err.message || "Failed to send message",
-          });
-        }
-      }
-    );
-
-    // Handle typing status
-    socket.on(
-      "typing",
-      (data: { conversationId: string; receiverId?: string }) => {
-        socket
-          .to(`conversation:${data.conversationId}`)
-          .emit("typing", { conversationId: data.conversationId, userId });
-      }
-    );
-
-    socket.on(
-      "stop_typing",
-      (data: { conversationId: string; receiverId?: string }) => {
-        socket
-          .to(`conversation:${data.conversationId}`)
-          .emit("stop_typing", { conversationId: data.conversationId, userId });
-      }
-    );
-
-    // Handle message read status
-    socket.on(
-      "message_read",
-      async (data: { conversationId: string; messageIds?: string[] }) => {
-        try {
-          await ChatService.markAsRead(userId, data.conversationId);
-
-          io.to(`conversation:${data.conversationId}`).emit("message_read", {
+          io.to(`user:${receiverId}`).emit("conversation_updated", {
             conversationId: data.conversationId,
-            readBy: userId,
-            readAt: new Date(),
+            message,
           });
-
-          // Also update user's unread counts in user rooms
-          const conversation = await Conversation.findById(data.conversationId);
-          if (conversation) {
-            conversation.participants.forEach((pId) => {
-              io.to(`user:${pId.toString()}`).emit("unread_count_updated", {
-                conversationId: data.conversationId,
-              });
-            });
-          }
-        } catch (err: any) {
-          socket.emit("error", { message: err.message });
+          io.to(`user:${receiverId}`).emit("new-message-notification", {
+            conversationId: data.conversationId,
+            message,
+          });
         }
+
+        // Broadcast to conversation rooms
+        const convRoom1 = `conversation:${data.conversationId}`;
+        const convRoom2 = `conversation_${data.conversationId}`;
+
+        io.to(convRoom1).to(convRoom2).emit("receive-message", message);
+        io.to(convRoom1).to(convRoom2).emit("receive_message", message);
+
+        // Notify sender room as well
+        io.to(`user:${userId}`).emit("conversation-updated", {
+          conversationId: data.conversationId,
+          message,
+        });
+        io.to(`user:${userId}`).emit("conversation_updated", {
+          conversationId: data.conversationId,
+          message,
+        });
+      } catch (err: any) {
+        socket.emit("error", {
+          message: err.message || "Failed to send message",
+        });
       }
-    );
+    };
 
-    // Handle message delivery status
-    socket.on(
-      "message_delivered",
-      async (data: { conversationId: string; messageId: string }) => {
-        try {
-          await Message.findByIdAndUpdate(data.messageId, {
-            delivered: true,
-            deliveredAt: new Date(),
-          });
+    socket.on("send-message", handleSendMessage);
+    socket.on("send_message", handleSendMessage);
 
-          io.to(`conversation:${data.conversationId}`).emit(
-            "message_delivered",
-            {
+    // Typing Handlers
+    const handleTyping = (data: { conversationId: string; receiverId?: string }) => {
+      const room1 = `conversation:${data.conversationId}`;
+      const room2 = `conversation_${data.conversationId}`;
+      socket.to(room1).to(room2).emit("typing", {
+        conversationId: data.conversationId,
+        userId,
+      });
+    };
+
+    const handleStopTyping = (data: { conversationId: string; receiverId?: string }) => {
+      const room1 = `conversation:${data.conversationId}`;
+      const room2 = `conversation_${data.conversationId}`;
+      socket.to(room1).to(room2).emit("stop-typing", {
+        conversationId: data.conversationId,
+        userId,
+      });
+      socket.to(room1).to(room2).emit("stop_typing", {
+        conversationId: data.conversationId,
+        userId,
+      });
+    };
+
+    socket.on("typing", handleTyping);
+    socket.on("stop-typing", handleStopTyping);
+    socket.on("stop_typing", handleStopTyping);
+
+    // Message Seen / Read Handler
+    const handleMessageSeen = async (data: { conversationId: string }) => {
+      try {
+        await ChatService.markAsRead(userId, data.conversationId);
+
+        const room1 = `conversation:${data.conversationId}`;
+        const room2 = `conversation_${data.conversationId}`;
+        const seenAt = new Date();
+
+        const payload = {
+          conversationId: data.conversationId,
+          readBy: userId,
+          readAt: seenAt,
+          seenAt,
+          status: "seen",
+        };
+
+        io.to(room1).to(room2).emit("message-seen", payload);
+        io.to(room1).to(room2).emit("message_read", payload);
+
+        // Update user unread count
+        const conversation = await Conversation.findById(data.conversationId);
+        if (conversation) {
+          conversation.participants.forEach((pId) => {
+            io.to(`user:${pId.toString()}`).emit("unread-count-updated", {
               conversationId: data.conversationId,
-              messageId: data.messageId,
-              deliveredAt: new Date(),
-            }
-          );
-        } catch (err: any) {
-          socket.emit("error", { message: err.message });
+            });
+            io.to(`user:${pId.toString()}`).emit("unread_count_updated", {
+              conversationId: data.conversationId,
+            });
+          });
         }
+      } catch (err: any) {
+        socket.emit("error", { message: err.message });
       }
-    );
+    };
 
-    // Check if a specific user is online
+    socket.on("message-seen", handleMessageSeen);
+    socket.on("message_read", handleMessageSeen);
+
+    // Message Delivered Handler
+    const handleMessageDelivered = async (data: { conversationId: string; messageId: string }) => {
+      try {
+        const deliveredAt = new Date();
+        await Message.findByIdAndUpdate(data.messageId, {
+          status: "delivered",
+          delivered: true,
+          deliveredAt,
+        });
+
+        const room1 = `conversation:${data.conversationId}`;
+        const room2 = `conversation_${data.conversationId}`;
+        const payload = {
+          conversationId: data.conversationId,
+          messageId: data.messageId,
+          deliveredAt,
+          status: "delivered",
+        };
+
+        io.to(room1).to(room2).emit("message-delivered", payload);
+        io.to(room1).to(room2).emit("message_delivered", payload);
+      } catch (err: any) {
+        socket.emit("error", { message: err.message });
+      }
+    };
+
+    socket.on("message-delivered", handleMessageDelivered);
+    socket.on("message_delivered", handleMessageDelivered);
+
+    // Check Online Status of User
     socket.on("check_online_status", (targetUserId: string) => {
       const isOnline =
         onlineUsers.has(targetUserId) &&
@@ -213,14 +274,18 @@ export const setupSocketHandlers = (io: Server) => {
       socket.emit("online_status_response", { userId: targetUserId, isOnline });
     });
 
-    // Handle socket disconnect
+    // Handle Disconnect
     socket.on("disconnect", () => {
       const userSockets = onlineUsers.get(userId);
       if (userSockets) {
         userSockets.delete(socket.id);
         if (userSockets.size === 0) {
           onlineUsers.delete(userId);
-          // Broadcast user offline to all clients
+
+          // Broadcast updated online users list
+          const updatedOnlineUserIds = Array.from(onlineUsers.keys());
+          io.emit("online-users", updatedOnlineUserIds);
+          io.emit("online_users", updatedOnlineUserIds);
           io.emit("user_offline", {
             userId,
             lastSeen: new Date(),
