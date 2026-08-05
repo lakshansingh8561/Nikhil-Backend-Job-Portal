@@ -492,6 +492,7 @@ export class ChatService {
       ? "unreadCounts.jobSeeker"
       : "unreadCounts.recruiter";
 
+    const now = new Date();
     await Message.updateMany(
       {
         conversationId,
@@ -500,8 +501,10 @@ export class ChatService {
       },
       {
         $set: {
+          status: "seen",
           read: true,
-          readAt: new Date(),
+          readAt: now,
+          seenAt: now,
         },
       }
     );

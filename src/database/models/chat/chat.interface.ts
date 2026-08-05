@@ -24,6 +24,7 @@ export interface IAttachment {
 }
 
 export type MessageType = "text" | "image" | "file";
+export type MessageStatus = "sent" | "delivered" | "seen";
 
 export interface IMessage extends Document {
   conversationId: Types.ObjectId;
@@ -32,8 +33,11 @@ export interface IMessage extends Document {
   message: string;
   messageType: MessageType;
   attachments?: IAttachment[];
+  status: MessageStatus;
+  sentAt?: Date;
   read: boolean;
   readAt?: Date;
+  seenAt?: Date;
   delivered: boolean;
   deliveredAt?: Date;
   replyTo?: Types.ObjectId;
