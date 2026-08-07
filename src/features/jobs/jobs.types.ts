@@ -27,6 +27,8 @@ export interface JobQuery {
 
   location?: string;
 
+  industry?: string;
+
   employmentType?: EmploymentType;
 
   experienceLevel?: ExperienceLevel;
@@ -36,6 +38,8 @@ export interface JobQuery {
   salaryMax?: number;
 
   skills?: string | string[];
+
+  userId?: string;
 
   recruiterId?: string;
 

@@ -1,35 +1,39 @@
 import { Document, Types } from "mongoose";
-import { EmploymentType } from "../../../common/enums/employmentType.enum";
-import { ExperienceLevel } from "../../../common/enums/experienceLevel.enum";
+
+export type WorkplaceType = "REMOTE" | "HYBRID" | "ONSITE";
+export type JobType = "FULL_TIME" | "PART_TIME" | "CONTRACT" | "INTERNSHIP" | "FREELANCE";
+export type JobStatus = "DRAFT" | "ACTIVE" | "PAUSED" | "CLOSED" | "ARCHIVED";
+
+export interface IJobLocation {
+  city?: string;
+  state?: string;
+  country?: string;
+  postalCode?: string;
+  latitude?: number;
+  longitude?: number;
+}
 
 export interface IJob extends Document {
   title: string;
-
   description: string;
-
+  requirements?: string;
+  responsibilities?: string;
   companyId: Types.ObjectId;
-
-  recruiterId: Types.ObjectId;
-
-  location: string;
-
-  salaryMin: number;
-
-  salaryMax: number;
-
-  employmentType: EmploymentType;
-
-  experienceLevel: ExperienceLevel;
-
-  skills: string[];
-
-  vacancies: number;
-
-  deadline: Date;
-
-  isActive: boolean;
-
+  userId: Types.ObjectId;
+  workplaceType: WorkplaceType;
+  jobType: JobType;
+  status: JobStatus;
+  isActive?: boolean;
+  location?: any;
+  salaryMin?: number;
+  salaryMax?: number;
+  currency?: string;
+  skills?: string[];
+  employmentType?: string;
+  experienceLevel?: string;
+  deadline?: Date;
+  isDeleted: boolean;
+  deletedAt?: Date | null;
   createdAt: Date;
-
   updatedAt: Date;
 }

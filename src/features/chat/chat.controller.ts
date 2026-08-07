@@ -89,25 +89,6 @@ export class ChatController {
       try {
         const io = getIO();
         const conversationId = req.params.id as string;
-        const receiverId = (message.receiver as any)?.toString();
-        const onlineUsersMap = getOnlineUsers();
-
-        const isReceiverOnline =
-          receiverId &&
-          onlineUsersMap.has(receiverId) &&
-          onlineUsersMap.get(receiverId)!.size > 0;
-
-        if (isReceiverOnline) {
-          const now = new Date();
-          await Message.findByIdAndUpdate(message._id || message.id, {
-            status: "delivered",
-            delivered: true,
-            deliveredAt: now,
-          });
-          (message as any).status = "delivered";
-          (message as any).delivered = true;
-          (message as any).deliveredAt = now;
-        }
 
         if (io) {
           const convRoom1 = `conversation:${conversationId}`;
@@ -115,25 +96,6 @@ export class ChatController {
 
           io.to(convRoom1).to(convRoom2).emit("receive-message", message);
           io.to(convRoom1).to(convRoom2).emit("receive_message", message);
-
-          if (receiverId) {
-            io.to(`user:${receiverId}`).emit("conversation-updated", {
-              conversationId,
-              message,
-            });
-            io.to(`user:${receiverId}`).emit("conversation_updated", {
-              conversationId,
-              message,
-            });
-          }
-          io.to(`user:${req.user.userId}`).emit("conversation-updated", {
-            conversationId,
-            message,
-          });
-          io.to(`user:${req.user.userId}`).emit("conversation_updated", {
-            conversationId,
-            message,
-          });
         }
       } catch (err) {
         console.warn("Socket broadcast warning in sendMessage:", err);
@@ -205,6 +167,24 @@ export class ChatController {
       );
     }
   );
+
+  static deleteConversation = asyncHandler(
+    async (req: Request, res: Response) => {
+      const result = await ChatService.deleteConversation(
+        req.user.userId,
+        req.params.id as string
+      );
+
+      res.status(HTTP_STATUS.OK).json(
+        new ApiResponse(
+          true,
+          "Conversation deleted successfully",
+          result
+        )
+      );
+    }
+  );
+
 
   static markAsRead = asyncHandler(
     async (req: Request, res: Response) => {

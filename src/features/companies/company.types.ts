@@ -1,29 +1,30 @@
 export interface CreateCompanyInput {
-  companyName: string;
-  tagline?: string;
+  name: string;
+  companyName?: string;
   description?: string;
-  mission?: string;
-  vision?: string;
-  industry: string;
-  companySize: string;
+  industry?: string;
+  companySize?: string;
   website?: string;
   email?: string;
   phone?: string;
   logo?: string;
   coverImage?: string;
-  foundedYear?: number;
-  headquarters?: string;
-  address?: string;
-  city?: string;
-  state?: string;
-  country?: string;
-  linkedin?: string;
-  facebook?: string;
-  twitter?: string;
-  instagram?: string;
-  github?: string;
-  youtube?: string;
-  officeImages?: string[];
+  location?: {
+    city?: string;
+    state?: string;
+    country?: string;
+    postalCode?: string;
+    address?: string;
+    latitude?: number;
+    longitude?: number;
+  };
+  socialLinks?: {
+    linkedin?: string;
+    twitter?: string;
+    github?: string;
+    facebook?: string;
+    website?: string;
+  };
 }
 
 export interface UpdateCompanyInput

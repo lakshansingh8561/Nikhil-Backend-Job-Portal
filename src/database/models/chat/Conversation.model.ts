@@ -1,8 +1,41 @@
 import { Schema, model } from "mongoose";
 import { IConversation } from "./chat.interface";
 
+const conversationMemberSchema = new Schema(
+  {
+    userId: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
+    lastReadMessageId: {
+      type: Schema.Types.ObjectId,
+      ref: "Message",
+    },
+    joinedAt: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  { _id: false }
+);
+
 const conversationSchema = new Schema<IConversation>(
   {
+    type: {
+      type: String,
+      enum: ["DIRECT", "GROUP", "SYSTEM"],
+      default: "DIRECT",
+    },
+    title: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    createdBy: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+    },
     participants: [
       {
         type: Schema.Types.ObjectId,
@@ -10,50 +43,30 @@ const conversationSchema = new Schema<IConversation>(
         required: true,
       },
     ],
-
-    recruiter: {
-      type: Schema.Types.ObjectId,
-      ref: "User",
-      required: true,
-      index: true,
+    members: {
+      type: [conversationMemberSchema],
+      default: [],
     },
-
-    jobSeeker: {
-      type: Schema.Types.ObjectId,
-      ref: "User",
-      required: true,
-      index: true,
-    },
-
     jobId: {
       type: Schema.Types.ObjectId,
       ref: "Job",
-      required: true,
       index: true,
     },
-
     lastMessage: {
       type: Schema.Types.ObjectId,
       ref: "Message",
-      default: null,
     },
-
     lastMessageAt: {
       type: Date,
-      default: Date.now,
     },
-
-    unreadCounts: {
-      jobSeeker: {
-        type: Number,
-        default: 0,
-        min: 0,
-      },
-      recruiter: {
-        type: Number,
-        default: 0,
-        min: 0,
-      },
+    isDeleted: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    deletedAt: {
+      type: Date,
+      default: null,
     },
   },
   {
@@ -61,12 +74,17 @@ const conversationSchema = new Schema<IConversation>(
   }
 );
 
-// Performance & uniqueness indexes
-conversationSchema.index(
-  { recruiter: 1, jobSeeker: 1, jobId: 1 },
-  { unique: true }
-);
+conversationSchema.pre("save", function (next) {
+  if (this.members && this.members.length > 0 && (!this.participants || this.participants.length === 0)) {
+    this.participants = this.members.map((m: any) => m.userId);
+  } else if (this.participants && this.participants.length > 0 && (!this.members || this.members.length === 0)) {
+    this.members = this.participants.map((p: any) => ({ userId: p, joinedAt: new Date() }));
+  }
+  next();
+});
+
 conversationSchema.index({ participants: 1 });
+conversationSchema.index({ "members.userId": 1 });
 conversationSchema.index({ updatedAt: -1 });
 
 export const Conversation = model<IConversation>(

@@ -8,88 +8,42 @@ const recruiterProfileSchema = new Schema<IRecruiterProfile>(
       ref: "User",
       required: true,
       unique: true,
+      index: true,
     },
-
-    firstName: {
-      type: String,
-      required: true,
-      trim: true,
-    },
-
-    lastName: {
-      type: String,
-      required: true,
-      trim: true,
-    },
-
-    phone: {
-      type: String,
-      required: true,
-      trim: true,
-    },
-
     designation: {
       type: String,
       required: true,
       trim: true,
+      default: "Recruiter",
     },
-
+    department: {
+      type: String,
+      default: "",
+      trim: true,
+    },
     currentCompany: {
       type: String,
       default: "",
       trim: true,
     },
-
     experience: {
       type: Number,
       default: 0,
       min: 0,
     },
-
-    currentLocation: {
-      type: String,
-      default: "",
-      trim: true,
-    },
-
-    headline: {
-      type: String,
-      default: "",
-      trim: true,
-    },
-
-    bio: {
-      type: String,
-      default: "",
-      trim: true,
-    },
-
-    linkedin: {
-      type: String,
-      default: "",
-      trim: true,
-    },
-
-    github: {
-      type: String,
-      default: "",
-      trim: true,
-    },
-
-    portfolio: {
-      type: String,
-      default: "",
-      trim: true,
-    },
-
-    profilePicture: {
-      type: String,
-      default: "",
-    },
-
     companyId: {
       type: Schema.Types.ObjectId,
       ref: "Company",
+      default: null,
+      index: true,
+    },
+    isDeleted: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    deletedAt: {
+      type: Date,
       default: null,
     },
   },

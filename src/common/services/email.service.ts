@@ -375,4 +375,77 @@ export class EmailService {
     `;
     return this.sendMail({ to: applicantEmail, subject, html });
   }
+
+  /**
+   * 5. Send Subscription Renewal Reminder email (3 days prior to expiry)
+   */
+  public static async sendSubscriptionRenewalReminder({
+    email,
+    name = "Member",
+    planName,
+    expiryDate,
+    daysRemaining = 3,
+  }: {
+    email: string;
+    name?: string;
+    planName: string;
+    expiryDate: Date;
+    daysRemaining?: number;
+  }) {
+    const formattedExpiry = new Date(expiryDate).toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+
+    const subject = `⚠️ Membership Expiring Soon: ${daysRemaining} days left on your ${planName} Plan`;
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f5f7fc; margin: 0; padding: 0; }
+          .container { max-width: 600px; margin: 30px auto; background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.08); border: 1px solid #eaeff7; }
+          .header { background: linear-gradient(135deg, #D97706 0%, #F59E0B 100%); padding: 36px 24px; text-align: center; color: #ffffff; }
+          .header h1 { margin: 0; font-size: 26px; font-weight: 800; }
+          .header p { margin: 8px 0 0; font-size: 14px; opacity: 0.95; }
+          .content { padding: 32px 24px; color: #05264E; }
+          .greeting { font-size: 18px; font-weight: 700; margin-bottom: 16px; }
+          .message { font-size: 14px; line-height: 1.6; color: #66789c; margin-bottom: 24px; }
+          .card { background: #FFFBEB; border-radius: 14px; padding: 20px; border: 1px solid #FDE68A; margin-bottom: 24px; }
+          .btn-container { text-align: center; margin: 32px 0 16px; }
+          .btn { background: #D97706; color: #ffffff !important; padding: 14px 32px; border-radius: 12px; font-size: 14px; font-weight: 700; text-decoration: none; display: inline-block; }
+          .footer { background: #f8fafc; padding: 20px; text-align: center; font-size: 12px; color: #94a3b8; border-top: 1px solid #eaeff7; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>JobBox Membership</h1>
+            <p>Renewal Reminder</p>
+          </div>
+          <div class="content">
+            <div class="greeting">Hi ${name},</div>
+            <div class="message">
+              Your <strong>${planName} Membership</strong> is set to expire on <strong>${formattedExpiry}</strong> (${daysRemaining} days remaining).
+            </div>
+            <div class="card">
+              <div style="font-weight: 700; color: #92400E; margin-bottom: 6px;">Don't lose your plan benefits!</div>
+              <div style="font-size: 13px; color: #B45309;">Renew now to maintain uninterrupted access to job postings, applicant tracking, and recruiter features.</div>
+            </div>
+            <div class="btn-container">
+              <a href="http://localhost:5173/recruiter/pricing" class="btn">Renew Membership Now</a>
+            </div>
+          </div>
+          <div class="footer">
+            © ${new Date().getFullYear()} JobBox Recruitment Platform. All rights reserved.
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+    return this.sendMail({ to: email, subject, html });
+  }
 }

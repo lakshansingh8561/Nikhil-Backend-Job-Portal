@@ -9,6 +9,8 @@ import { jobRoutes } from "../features/jobs";
 import notificationRoutes from "../features/notifications/notification.routes";
 import { chatRoutes } from "../features/chat";
 import { locationRoutes } from "../features/location";
+import { membershipRoutes } from "../features/memberships";
+import { paymentRoutes } from "../features/payments";
 
 const router = Router();
 
@@ -22,6 +24,7 @@ router.use("/jobs", jobRoutes);
 router.use("/notifications", notificationRoutes);
 router.use("/chat", chatRoutes);
 router.use("/location", locationRoutes);
+router.use("/memberships", membershipRoutes);
+router.use("/payments", paymentRoutes);
+
 export default router;
-
-

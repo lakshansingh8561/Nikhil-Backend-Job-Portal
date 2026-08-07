@@ -3,6 +3,7 @@ import { asyncHandler } from "../../common/utils/asyncHandler";
 import { ApiResponse } from "../../common/utils/ApiResponse";
 import { HTTP_STATUS } from "../../common/constants/httpStatus";
 import { AdminService } from "./admin.service";
+import { PaymentService } from "../payments/payment.service";
 import { ADMIN_MESSAGES } from "./admin.constants";
 
 export class AdminController {
@@ -122,6 +123,34 @@ export class AdminController {
           true,
           "Applications fetched successfully",
           applicationsData
+        )
+      );
+    }
+  );
+
+  static getMembershipStats = asyncHandler(
+    async (_req: Request, res: Response) => {
+      const stats = await AdminService.getMembershipStats();
+
+      res.status(HTTP_STATUS.OK).json(
+        new ApiResponse(
+          true,
+          "Membership statistics fetched successfully",
+          stats
+        )
+      );
+    }
+  );
+
+  static getPayments = asyncHandler(
+    async (req: Request, res: Response) => {
+      const payments = await PaymentService.getAdminPayments(req.query as any);
+
+      res.status(HTTP_STATUS.OK).json(
+        new ApiResponse(
+          true,
+          "Admin payments fetched successfully",
+          payments
         )
       );
     }

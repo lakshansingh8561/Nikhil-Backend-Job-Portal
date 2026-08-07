@@ -86,4 +86,24 @@ router.get(
   AdminController.getAllApplications
 );
 
+/*
+|--------------------------------------------------------------------------
+| Payment & Membership Management
+|--------------------------------------------------------------------------
+*/
+
+router.get(
+  "/payments",
+  authenticate,
+  authorize(Role.ADMIN),
+  AdminController.getPayments
+);
+
+router.get(
+  "/membership-stats",
+  authenticate,
+  authorize(Role.ADMIN),
+  AdminController.getMembershipStats
+);
+
 export default router;

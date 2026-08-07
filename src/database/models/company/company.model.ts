@@ -3,146 +3,105 @@ import { ICompany } from "./company.interface";
 
 const companySchema = new Schema<ICompany>(
   {
-    ownerId: {
-      type: Schema.Types.ObjectId,
-      ref: "User",
-      required: true,
-    },
-
-    companyName: {
+    name: {
       type: String,
       required: true,
       trim: true,
     },
-
-    tagline: {
-      type: String,
-      default: "",
+    userId: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      index: true,
     },
-
+    slug: {
+      type: String,
+      required: true,
+      unique: true,
+      trim: true,
+      lowercase: true,
+      index: true,
+    },
     description: {
       type: String,
       default: "",
-    },
-
-    mission: {
-      type: String,
-      default: "",
-    },
-
-    vision: {
-      type: String,
-      default: "",
-    },
-
-    industry: {
-      type: String,
-      required: true,
       trim: true,
     },
-
-    companySize: {
-      type: String,
-      required: true,
-    },
-
-    website: {
+    industry: {
       type: String,
       default: "",
+      trim: true,
     },
-
+    companySize: {
+      type: String,
+      default: "1-10",
+      trim: true,
+    },
     email: {
       type: String,
       default: "",
+      trim: true,
     },
-
     phone: {
       type: String,
       default: "",
+      trim: true,
     },
-
+    website: {
+      type: String,
+      default: "",
+      trim: true,
+    },
     logo: {
       type: String,
       default: "",
     },
-
     coverImage: {
       type: String,
       default: "",
     },
-
-    foundedYear: {
-      type: Number,
+    location: {
+      city: { type: String, default: "" },
+      state: { type: String, default: "" },
+      country: { type: String, default: "" },
+      postalCode: { type: String, default: "" },
+      address: { type: String, default: "" },
+      latitude: { type: Number, default: 0 },
+      longitude: { type: Number, default: 0 },
     },
-
-    headquarters: {
+    socialLinks: {
+      linkedin: { type: String, default: "" },
+      twitter: { type: String, default: "" },
+      github: { type: String, default: "" },
+      facebook: { type: String, default: "" },
+      website: { type: String, default: "" },
+    },
+    verificationStatus: {
       type: String,
-      default: "",
+      enum: ["PENDING", "APPROVED", "REJECTED"],
+      default: "PENDING",
+      index: true,
     },
-
-    address: {
+    status: {
       type: String,
-      default: "",
+      enum: ["ACTIVE", "INACTIVE", "SUSPENDED", "PENDING"],
+      default: "ACTIVE",
+      index: true,
     },
-
-    city: {
-      type: String,
-      default: "",
-    },
-
-    state: {
-      type: String,
-      default: "",
-    },
-
-    country: {
-      type: String,
-      default: "",
-    },
-
-    linkedin: {
-      type: String,
-      default: "",
-    },
-
-    facebook: {
-      type: String,
-      default: "",
-    },
-
-    twitter: {
-      type: String,
-      default: "",
-    },
-
-    instagram: {
-      type: String,
-      default: "",
-    },
-
-    github: {
-      type: String,
-      default: "",
-    },
-
-    youtube: {
-      type: String,
-      default: "",
-    },
-
-    officeImages: {
-      type: [String],
-      default: [],
-    },
-
-    isVerified: {
+    isDeleted: {
       type: Boolean,
       default: false,
+      index: true,
+    },
+    deletedAt: {
+      type: Date,
+      default: null,
     },
   },
   {
     timestamps: true,
   }
 );
+
+companySchema.index({ name: "text", description: "text" });
 
 export const Company = model<ICompany>("Company", companySchema);

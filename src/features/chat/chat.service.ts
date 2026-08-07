@@ -2,15 +2,14 @@ import { Types } from "mongoose";
 import {
   Conversation,
   Message,
-  Application,
-  Job,
-  JobSeekerProfile,
-  RecruiterProfile,
   User,
+  UserProfile,
+  RecruiterProfile,
+  JobSeekerProfile,
+  Job,
 } from "../../database/models";
 import { ApiError } from "../../common/utils/ApiError";
 import { HTTP_STATUS } from "../../common/constants/httpStatus";
-import { Role } from "../../common/enums";
 import { CHAT_MESSAGES } from "./chat.constants";
 import {
   CreateConversationDto,
@@ -18,10 +17,55 @@ import {
   EditMessageDto,
   GetMessagesQueryDto,
 } from "./chat.types";
+import { Role } from "../../common/enums/role.enum";
 
 export class ChatService {
   /**
-   * Create or Get existing conversation between JobSeeker and Recruiter for a specific Job
+   * Helper to fetch unified recipient identity from User & UserProfile
+   */
+  private static async getRecipientIdentity(targetUserId: string) {
+    if (!targetUserId) {
+      return {
+        userId: "",
+        email: "",
+        role: "",
+        name: "User",
+        firstName: "User",
+        lastName: "",
+        profilePicture: "",
+        headline: "",
+        companyName: "",
+      };
+    }
+
+    const targetUser = await User.findById(targetUserId).select("email role status").lean();
+    const profile = await UserProfile.findOne({ userId: targetUserId }).lean();
+    const recruiterProf = await RecruiterProfile.findOne({ userId: targetUserId })
+      .populate("companyId", "name companyName logo")
+      .lean();
+
+    const firstName = profile?.firstName || (targetUser?.email ? targetUser.email.split("@")[0] : "User");
+    const lastName = profile?.lastName || "";
+    const name = `${firstName} ${lastName}`.trim();
+    const profilePicture = profile?.profilePicture || "";
+    const headline = profile?.headline || recruiterProf?.designation || (targetUser?.role === Role.RECRUITER ? "Recruiter" : "Job Applicant");
+    const companyName = (recruiterProf?.companyId as any)?.name || (recruiterProf?.companyId as any)?.companyName || recruiterProf?.currentCompany || "";
+
+    return {
+      userId: targetUserId,
+      email: targetUser?.email || "",
+      role: targetUser?.role || "",
+      name,
+      firstName,
+      lastName,
+      profilePicture,
+      headline,
+      companyName,
+    };
+  }
+
+  /**
+   * Create or fetch existing 1-on-1 conversation
    */
   static async createOrGetConversation(
     userId: string,
@@ -35,71 +79,73 @@ export class ChatService {
       );
     }
 
-    const { jobId, applicantId } = data;
+    let recipientId = data.recipientId || data.applicantId || data.recruiterId;
 
-    const job = await Job.findById(jobId);
-    if (!job) {
-      throw new ApiError(HTTP_STATUS.NOT_FOUND, "Job not found");
+    // Auto-resolve recruiter from jobId if recipientId wasn't passed directly
+    if (!recipientId && data.jobId) {
+      const job = await Job.findById(data.jobId).lean();
+      if (job) {
+        const recId = (job as any).userId;
+        if (recId) {
+          recipientId = recId.toString();
+        }
+      }
     }
 
-    let jobSeekerId: string;
-    let recruiterId: string;
+    // Fallback: Find an active recruiter or candidate user if recipientId is still missing
+    if (!recipientId) {
+      const fallbackTargetRole = userRole === Role.JOB_SEEKER ? Role.RECRUITER : Role.JOB_SEEKER;
+      const fallbackUser = await User.findOne({
+        _id: { $ne: new Types.ObjectId(userId) },
+        role: fallbackTargetRole,
+        isDeleted: { $ne: true },
+      }).lean();
 
-    if (userRole === Role.JOB_SEEKER) {
-      jobSeekerId = userId;
-      recruiterId = job.recruiterId.toString();
-    } else if (userRole === Role.RECRUITER) {
-      if (!applicantId) {
-        throw new ApiError(
-          HTTP_STATUS.BAD_REQUEST,
-          "applicantId is required for recruiter to start conversation"
-        );
+      if (fallbackUser) {
+        recipientId = fallbackUser._id.toString();
       }
-      if (job.recruiterId.toString() !== userId) {
-        throw new ApiError(
-          HTTP_STATUS.FORBIDDEN,
-          "You are not the recruiter for this job posting"
-        );
-      }
-      jobSeekerId = applicantId;
-      recruiterId = userId;
-    } else {
+    }
+
+    if (!recipientId) {
       throw new ApiError(
-        HTTP_STATUS.FORBIDDEN,
-        CHAT_MESSAGES.ADMIN_CHAT_FORBIDDEN
+        HTTP_STATUS.BAD_REQUEST,
+        CHAT_MESSAGES.INVALID_PARTICIPANTS
       );
     }
 
-    // Verify Application exists
-    const application = await Application.findOne({
-      jobId,
-      applicantId: jobSeekerId,
-    });
-
-    if (!application) {
+    if (userId === recipientId) {
       throw new ApiError(
-        HTTP_STATUS.FORBIDDEN,
-        CHAT_MESSAGES.APPLICATION_REQUIRED
+        HTTP_STATUS.BAD_REQUEST,
+        CHAT_MESSAGES.CANNOT_CHAT_SELF
       );
     }
 
-    // Find existing conversation
+    const targetUser = await User.findById(recipientId);
+    if (!targetUser) {
+      throw new ApiError(
+        HTTP_STATUS.NOT_FOUND,
+        CHAT_MESSAGES.RECIPIENT_NOT_FOUND
+      );
+    }
+
     let conversation = await Conversation.findOne({
-      jobId,
-      jobSeeker: jobSeekerId,
-      recruiter: recruiterId,
+      $or: [
+        { participants: { $all: [new Types.ObjectId(userId), new Types.ObjectId(recipientId)] } },
+        { "members.userId": { $all: [new Types.ObjectId(userId), new Types.ObjectId(recipientId)] } },
+      ],
+      isDeleted: { $ne: true },
     });
 
     if (!conversation) {
       conversation = await Conversation.create({
-        participants: [
-          new Types.ObjectId(recruiterId),
-          new Types.ObjectId(jobSeekerId),
+        type: "DIRECT",
+        createdBy: new Types.ObjectId(userId),
+        participants: [new Types.ObjectId(userId), new Types.ObjectId(recipientId)],
+        members: [
+          { userId: new Types.ObjectId(userId), joinedAt: new Date() },
+          { userId: new Types.ObjectId(recipientId), joinedAt: new Date() },
         ],
-        recruiter: new Types.ObjectId(recruiterId),
-        jobSeeker: new Types.ObjectId(jobSeekerId),
-        jobId: new Types.ObjectId(jobId),
-        unreadCounts: { jobSeeker: 0, recruiter: 0 },
+        jobId: data.jobId ? new Types.ObjectId(data.jobId) : null,
       });
     }
 
@@ -118,81 +164,49 @@ export class ChatService {
     }
 
     const conversations = await Conversation.find({
-      participants: userId,
+      $or: [
+        { participants: new Types.ObjectId(userId) },
+        { "members.userId": new Types.ObjectId(userId) },
+      ],
+      isDeleted: { $ne: true },
     })
       .populate("jobId", "title companyId location")
       .populate("lastMessage")
       .sort({ updatedAt: -1 })
       .lean();
 
-    // Attach recipient profile and user details
     const formattedConversations = await Promise.all(
       conversations.map(async (conv) => {
-        const isUserJobSeeker = conv.jobSeeker.toString() === userId;
-        const targetUserId = isUserJobSeeker
-          ? conv.recruiter.toString()
-          : conv.jobSeeker.toString();
+        let targetUserId = "";
 
-        const targetUser = await User.findById(targetUserId).select(
-          "email role status"
-        );
+        if (conv.participants && conv.participants.length > 0) {
+          const otherP = conv.participants.find(
+            (p: any) => p.toString() !== userId
+          );
+          if (otherP) targetUserId = otherP.toString();
+        }
 
-        let recipientProfile: any = null;
-        if (isUserJobSeeker) {
-          const profile = await RecruiterProfile.findOne({
-            userId: targetUserId,
-          })
-            .populate("companyId", "name logo")
-            .lean();
-          if (profile) {
-            recipientProfile = {
-              name: `${profile.firstName} ${profile.lastName}`,
-              firstName: profile.firstName,
-              lastName: profile.lastName,
-              profilePicture: profile.profilePicture || "",
-              headline: profile.headline || profile.designation || "Recruiter",
-              companyName:
-                (profile.companyId as any)?.name || profile.currentCompany || "",
-            };
-          }
-        } else {
-          const profile = await JobSeekerProfile.findOne({
-            userId: targetUserId,
-          }).lean();
-          if (profile) {
-            recipientProfile = {
-              name: `${profile.firstName} ${profile.lastName}`,
-              firstName: profile.firstName,
-              lastName: profile.lastName,
-              profilePicture: profile.profilePicture || "",
-              headline: profile.headline || "Job Applicant",
-            };
+        if (!targetUserId && conv.members && conv.members.length > 0) {
+          const otherMember = conv.members.find(
+            (m: any) => m.userId.toString() !== userId
+          );
+          if (otherMember) {
+            targetUserId = otherMember.userId.toString();
           }
         }
 
-        if (!recipientProfile) {
-          recipientProfile = {
-            name: targetUser?.email ? targetUser.email.split("@")[0] : "User",
-            firstName: "User",
-            lastName: "",
-            profilePicture: "",
-            headline: "",
-          };
-        }
+        const recipient = await this.getRecipientIdentity(targetUserId);
 
-        const unreadCount = isUserJobSeeker
-          ? conv.unreadCounts?.jobSeeker || 0
-          : conv.unreadCounts?.recruiter || 0;
+        const unreadCount = await Message.countDocuments({
+          conversationId: conv._id,
+          sender: { $ne: new Types.ObjectId(userId) },
+          "reads.userId": { $ne: new Types.ObjectId(userId) },
+        });
 
         return {
           ...conv,
           id: conv._id.toString(),
-          recipient: {
-            userId: targetUserId,
-            email: targetUser?.email || "",
-            role: targetUser?.role || "",
-            ...recipientProfile,
-          },
+          recipient,
           unreadCount,
         };
       })
@@ -207,9 +221,13 @@ export class ChatService {
   static async getConversationById(userId: string, conversationId: string) {
     const conv = await Conversation.findOne({
       _id: conversationId,
-      participants: userId,
+      $or: [
+        { participants: new Types.ObjectId(userId) },
+        { "members.userId": new Types.ObjectId(userId) },
+      ],
+      isDeleted: { $ne: true },
     })
-      .populate("jobId", "title companyId location recruiterId")
+      .populate("jobId", "title companyId location userId")
       .populate("lastMessage")
       .lean();
 
@@ -220,71 +238,33 @@ export class ChatService {
       );
     }
 
-    const isUserJobSeeker = conv.jobSeeker.toString() === userId;
-    const targetUserId = isUserJobSeeker
-      ? conv.recruiter.toString()
-      : conv.jobSeeker.toString();
-
-    const targetUser = await User.findById(targetUserId).select(
-      "email role status"
-    );
-
-    let recipientProfile: any = null;
-    if (isUserJobSeeker) {
-      const profile = await RecruiterProfile.findOne({
-        userId: targetUserId,
-      })
-        .populate("companyId", "name logo")
-        .lean();
-      if (profile) {
-        recipientProfile = {
-          name: `${profile.firstName} ${profile.lastName}`,
-          firstName: profile.firstName,
-          lastName: profile.lastName,
-          profilePicture: profile.profilePicture || "",
-          headline: profile.headline || profile.designation || "Recruiter",
-          companyName:
-            (profile.companyId as any)?.name || profile.currentCompany || "",
-        };
-      }
-    } else {
-      const profile = await JobSeekerProfile.findOne({
-        userId: targetUserId,
-      }).lean();
-      if (profile) {
-        recipientProfile = {
-          name: `${profile.firstName} ${profile.lastName}`,
-          firstName: profile.firstName,
-          lastName: profile.lastName,
-          profilePicture: profile.profilePicture || "",
-          headline: profile.headline || "Job Applicant",
-        };
-      }
+    let targetUserId = "";
+    if (conv.participants && conv.participants.length > 0) {
+      const otherP = conv.participants.find(
+        (p: any) => p.toString() !== userId
+      );
+      if (otherP) targetUserId = otherP.toString();
     }
 
-    if (!recipientProfile) {
-      recipientProfile = {
-        name: targetUser?.email ? targetUser.email.split("@")[0] : "User",
-        firstName: "User",
-        lastName: "",
-        profilePicture: "",
-        headline: "",
-      };
+    if (!targetUserId && conv.members && conv.members.length > 0) {
+      const otherMember = conv.members.find(
+        (m: any) => m.userId.toString() !== userId
+      );
+      if (otherMember) targetUserId = otherMember.userId.toString();
     }
 
-    const unreadCount = isUserJobSeeker
-      ? conv.unreadCounts?.jobSeeker || 0
-      : conv.unreadCounts?.recruiter || 0;
+    const recipient = await this.getRecipientIdentity(targetUserId);
+
+    const unreadCount = await Message.countDocuments({
+      conversationId: conv._id,
+      sender: { $ne: new Types.ObjectId(userId) },
+      "reads.userId": { $ne: new Types.ObjectId(userId) },
+    });
 
     return {
       ...conv,
       id: conv._id.toString(),
-      recipient: {
-        userId: targetUserId,
-        email: targetUser?.email || "",
-        role: targetUser?.role || "",
-        ...recipientProfile,
-      },
+      recipient,
       unreadCount,
     };
   }
@@ -299,7 +279,11 @@ export class ChatService {
   ) {
     const conversation = await Conversation.findOne({
       _id: conversationId,
-      participants: userId,
+      $or: [
+        { participants: new Types.ObjectId(userId) },
+        { "members.userId": new Types.ObjectId(userId) },
+      ],
+      isDeleted: { $ne: true },
     });
 
     if (!conversation) {
@@ -326,7 +310,6 @@ export class ChatService {
       .limit(limit)
       .lean();
 
-    // Reverse so chronologically ascending for chat window display
     const chronologicalMessages = messages.reverse().map((msg) => ({
       ...msg,
       id: msg._id.toString(),
@@ -348,7 +331,11 @@ export class ChatService {
   ) {
     const conversation = await Conversation.findOne({
       _id: conversationId,
-      participants: userId,
+      $or: [
+        { participants: new Types.ObjectId(userId) },
+        { "members.userId": new Types.ObjectId(userId) },
+      ],
+      isDeleted: { $ne: true },
     });
 
     if (!conversation) {
@@ -358,39 +345,19 @@ export class ChatService {
       );
     }
 
-    const receiverId = conversation.participants
-      .find((p) => p.toString() !== userId)
-      ?.toString();
-
-    if (!receiverId) {
-      throw new ApiError(
-        HTTP_STATUS.BAD_REQUEST,
-        CHAT_MESSAGES.INVALID_PARTICIPANTS
-      );
-    }
-
     const message = await Message.create({
       conversationId: new Types.ObjectId(conversationId),
       sender: new Types.ObjectId(userId),
-      receiver: new Types.ObjectId(receiverId),
       message: data.message.trim(),
       messageType: data.messageType || "text",
       attachments: data.attachments || [],
+      reads: [{ userId: new Types.ObjectId(userId), readAt: new Date() }],
       replyTo: data.replyTo ? new Types.ObjectId(data.replyTo) : null,
-      read: false,
-      delivered: false,
     });
-
-    // Update conversation last message & increment target unread count
-    const isSenderJobSeeker = conversation.jobSeeker.toString() === userId;
-    const unreadKey = isSenderJobSeeker
-      ? "unreadCounts.recruiter"
-      : "unreadCounts.jobSeeker";
 
     await Conversation.findByIdAndUpdate(conversationId, {
       lastMessage: message._id,
       lastMessageAt: message.createdAt,
-      $inc: { [unreadKey]: 1 },
     });
 
     const populatedMessage = await Message.findById(message._id)
@@ -477,7 +444,11 @@ export class ChatService {
   static async markAsRead(userId: string, conversationId: string) {
     const conversation = await Conversation.findOne({
       _id: conversationId,
-      participants: userId,
+      $or: [
+        { participants: new Types.ObjectId(userId) },
+        { "members.userId": new Types.ObjectId(userId) },
+      ],
+      isDeleted: { $ne: true },
     });
 
     if (!conversation) {
@@ -487,52 +458,48 @@ export class ChatService {
       );
     }
 
-    const isUserJobSeeker = conversation.jobSeeker.toString() === userId;
-    const unreadKey = isUserJobSeeker
-      ? "unreadCounts.jobSeeker"
-      : "unreadCounts.recruiter";
-
     const now = new Date();
     await Message.updateMany(
       {
         conversationId,
-        receiver: userId,
-        read: false,
+        sender: { $ne: new Types.ObjectId(userId) },
+        "reads.userId": { $ne: new Types.ObjectId(userId) },
       },
       {
-        $set: {
-          status: "seen",
-          read: true,
-          readAt: now,
-          seenAt: now,
+        $push: {
+          reads: { userId: new Types.ObjectId(userId), readAt: now },
         },
       }
     );
-
-    await Conversation.findByIdAndUpdate(conversationId, {
-      $set: { [unreadKey]: 0 },
-    });
 
     return { conversationId, success: true };
   }
 
   /**
-   * Get total unread count for user across all conversations
+   * Get total unread count for user across all user's conversations ONLY
    */
   static async getUnreadCount(userId: string, userRole: Role) {
     if (userRole === Role.ADMIN) return { unreadCount: 0 };
 
-    const conversations = await Conversation.find({
-      participants: userId,
-    }).lean();
+    const myConversations = await Conversation.find({
+      $or: [
+        { participants: new Types.ObjectId(userId) },
+        { "members.userId": new Types.ObjectId(userId) },
+      ],
+      isDeleted: { $ne: true },
+    }).select("_id");
 
-    const totalUnread = conversations.reduce((acc, conv) => {
-      const isJobSeeker = conv.jobSeeker.toString() === userId;
-      const count = isJobSeeker
-        ? conv.unreadCounts?.jobSeeker || 0
-        : conv.unreadCounts?.recruiter || 0;
-      return acc + count;
-    }, 0);
+    const conversationIds = myConversations.map((c) => c._id);
+
+    if (conversationIds.length === 0) {
+      return { unreadCount: 0 };
+    }
+
+    const totalUnread = await Message.countDocuments({
+      conversationId: { $in: conversationIds },
+      sender: { $ne: new Types.ObjectId(userId) },
+      "reads.userId": { $ne: new Types.ObjectId(userId) },
+    });
 
     return { unreadCount: totalUnread };
   }
@@ -547,7 +514,11 @@ export class ChatService {
   ) {
     const conversation = await Conversation.findOne({
       _id: conversationId,
-      participants: userId,
+      $or: [
+        { participants: new Types.ObjectId(userId) },
+        { "members.userId": new Types.ObjectId(userId) },
+      ],
+      isDeleted: { $ne: true },
     });
 
     if (!conversation) {
@@ -566,5 +537,31 @@ export class ChatService {
       .lean();
 
     return messages.map((m) => ({ ...m, id: m._id.toString() }));
+  }
+
+  /**
+   * Soft delete an entire conversation for the current user
+   */
+  static async deleteConversation(userId: string, conversationId: string) {
+    const conversation = await Conversation.findOne({
+      _id: conversationId,
+      $or: [
+        { participants: new Types.ObjectId(userId) },
+        { "members.userId": new Types.ObjectId(userId) },
+      ],
+    });
+
+    if (!conversation) {
+      throw new ApiError(
+        HTTP_STATUS.NOT_FOUND,
+        CHAT_MESSAGES.CONVERSATION_NOT_FOUND
+      );
+    }
+
+    conversation.isDeleted = true;
+    conversation.deletedAt = new Date();
+    await conversation.save();
+
+    return { conversationId };
   }
 }
