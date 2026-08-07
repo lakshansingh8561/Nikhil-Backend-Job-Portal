@@ -1,8 +1,10 @@
 import { MessageType } from "../../database/models/chat";
 
 export interface CreateConversationDto {
-  jobId: string;
-  applicantId: string; // Required if caller is recruiter; if caller is jobSeeker, candidate is caller
+  jobId?: string;
+  applicantId?: string;
+  recruiterId?: string;
+  recipientId?: string;
 }
 
 export interface SendMessageDto {
@@ -22,7 +24,7 @@ export interface EditMessageDto {
 
 export interface GetMessagesQueryDto {
   limit?: number;
-  before?: string; // ISO date string or Message ID for cursor pagination
+  before?: string;
 }
 
 export interface SearchMessagesQueryDto {

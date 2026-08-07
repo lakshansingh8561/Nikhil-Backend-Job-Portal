@@ -80,6 +80,17 @@ export class AuthController {
         data
       )
     );
-  }
-);
+  });
+
+  static changePassword = asyncHandler(async (req: Request, res: Response) => {
+    const data = await AuthService.changePassword(req.user.userId, req.body);
+
+    res.status(HTTP_STATUS.OK).json(
+      new ApiResponse(
+        true,
+        "Password updated successfully.",
+        data
+      )
+    );
+  });
 }

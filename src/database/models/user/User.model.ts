@@ -11,6 +11,7 @@ const userSchema = new Schema<IUser>(
       unique: true,
       trim: true,
       lowercase: true,
+      index: true,
     },
     password: {
       type: String,
@@ -18,49 +19,39 @@ const userSchema = new Schema<IUser>(
       minlength: 8,
       select: false,
     },
-
     role: {
       type: String,
       enum: Object.values(Role),
       default: Role.JOB_SEEKER,
       required: true,
+      index: true,
     },
-
     status: {
       type: String,
       enum: Object.values(UserStatus),
       default: UserStatus.ACTIVE,
+      index: true,
     },
-
     isVerified: {
       type: Boolean,
       default: false,
     },
-
     lastLogin: {
       type: Date,
     },
-      refreshToken: {
-      type: String,
-      default: null,
-      select: false,
+    isDeleted: {
+      type: Boolean,
+      default: false,
+      index: true,
     },
-
-    location: {
-      city: { type: String, default: "" },
-      state: { type: String, default: "" },
-      country: { type: String, default: "" },
-      postalCode: { type: String, default: "" },
-      latitude: { type: Number, default: 0 },
-      longitude: { type: Number, default: 0 },
+    deletedAt: {
+      type: Date,
+      default: null,
     },
   },
   {
     timestamps: true,
   }
 );
-
-// performance indexes 
-// userSchema.index({ email: 1 });
 
 export const User = model<IUser>("User", userSchema);

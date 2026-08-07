@@ -3,51 +3,32 @@ import { Document, Types } from "mongoose";
 export interface IEducation {
   institution: string;
   degree: string;
-  fieldOfStudy: string;
+  fieldOfStudy?: string;
   startDate: Date;
   endDate?: Date;
-  currentlyStudying: boolean;
+  currentlyStudying?: boolean;
 }
 
 export interface IExperience {
   company: string;
   designation: string;
-  employmentType: string;
+  employmentType?: string;
   startDate: Date;
   endDate?: Date;
-  currentlyWorking: boolean;
+  currentlyWorking?: boolean;
   description?: string;
 }
 
 export interface IJobSeekerProfile extends Document {
   userId: Types.ObjectId;
-
-  firstName: string;
-  lastName: string;
-
-  phone: string;
-
-  headline?: string;
-
-  bio?: string;
-
-  currentLocation?: string;
-
+  resumeUrl?: string;
   yearsOfExperience: number;
-
   expectedSalary?: number;
-
-  skills: string[];
-
+  noticePeriodDays?: number;
   education: IEducation[];
-
   experience: IExperience[];
-
-  resume?: string;
-
-  profilePicture?: string;
-
+  isDeleted: boolean;
+  deletedAt?: Date | null;
   createdAt: Date;
-
   updatedAt: Date;
 }

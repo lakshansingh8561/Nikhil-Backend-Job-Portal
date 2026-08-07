@@ -3,6 +3,11 @@ import {
   Job,
   Application,
   Company,
+  UserProfile,
+  JobSeekerProfile,
+  RecruiterProfile,
+  Payment,
+  Subscription,
 } from "../../database/models";
 import { ApiError } from "../../common/utils/ApiError";
 import { HTTP_STATUS } from "../../common/constants/httpStatus";
@@ -33,27 +38,27 @@ export class AdminService {
       recentJobs,
       recentApplications,
     ] = await Promise.all([
-      User.countDocuments(),
-      User.countDocuments({ role: Role.RECRUITER }),
-      User.countDocuments({ role: Role.JOB_SEEKER }),
-      Company.countDocuments(),
-      Job.countDocuments(),
-      Application.countDocuments(),
-      User.find()
+      User.countDocuments({ isDeleted: { $ne: true } }),
+      User.countDocuments({ role: Role.RECRUITER, isDeleted: { $ne: true } }),
+      User.countDocuments({ role: Role.JOB_SEEKER, isDeleted: { $ne: true } }),
+      Company.countDocuments({ isDeleted: { $ne: true } }),
+      Job.countDocuments({ isDeleted: { $ne: true } }),
+      Application.countDocuments({ isDeleted: { $ne: true } }),
+      User.find({ isDeleted: { $ne: true } })
         .select("-password -refreshToken")
         .sort({ createdAt: -1 })
         .limit(5),
-      User.find({ role: Role.RECRUITER })
+      User.find({ role: Role.RECRUITER, isDeleted: { $ne: true } })
         .select("-password -refreshToken")
         .sort({ createdAt: -1 })
         .limit(5),
-      Job.find()
+      Job.find({ isDeleted: { $ne: true } })
         .populate("companyId", "companyName logo")
-        .populate("recruiterId", "email")
+        .populate("userId", "email")
         .sort({ createdAt: -1 })
         .limit(5),
-      Application.find()
-        .populate("applicantId")
+      Application.find({ isDeleted: { $ne: true } })
+        .populate("userId")
         .populate({
           path: "jobId",
           populate: {
@@ -83,7 +88,7 @@ export class AdminService {
     const limit = Math.max(1, Number(params.limit) || 10);
     const skip = (page - 1) * limit;
 
-    const filter: any = {};
+    const filter: any = { isDeleted: { $ne: true } };
 
     if (params.role && params.role !== "ALL") {
       filter.role = params.role;
@@ -97,19 +102,59 @@ export class AdminService {
       const searchRegex = new RegExp(params.search, "i");
       filter.$or = [
         { email: searchRegex },
-        { firstName: searchRegex },
-        { lastName: searchRegex },
       ];
     }
 
-    const [items, totalItems] = await Promise.all([
+    const [rawUsers, totalItems] = await Promise.all([
       User.find(filter)
         .select("-password -refreshToken")
         .sort({ createdAt: -1 })
         .skip(skip)
-        .limit(limit),
+        .limit(limit)
+        .lean(),
       User.countDocuments(filter),
     ]);
+
+    const userIds = rawUsers.map((u: any) => u._id);
+
+    const activeSubscriptions = await Subscription.find({
+      userId: { $in: userIds },
+      status: "ACTIVE",
+      endDate: { $gt: new Date() },
+    }).lean();
+
+    const subMap = new Map();
+    activeSubscriptions.forEach((sub: any) => {
+      subMap.set(sub.userId.toString(), sub);
+    });
+
+    const now = new Date();
+
+    const items = rawUsers.map((u: any) => {
+      const sub = subMap.get(u._id.toString());
+      let membership = {
+        planName: "Free",
+        status: "FREE",
+        remainingDays: 0,
+        endDate: null,
+      };
+
+      if (sub) {
+        const diffMs = new Date(sub.endDate).getTime() - now.getTime();
+        const days = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+        membership = {
+          planName: sub.planName,
+          status: sub.status,
+          remainingDays: days,
+          endDate: sub.endDate,
+        };
+      }
+
+      return {
+        ...u,
+        membership,
+      };
+    });
 
     const totalPages = Math.ceil(totalItems / limit) || 1;
 
@@ -123,7 +168,7 @@ export class AdminService {
   }
 
   static async getUserById(userId: string) {
-    const user = await User.findById(userId).select("-password -refreshToken");
+    const user = await User.findOne({ _id: userId, isDeleted: { $ne: true } }).select("-password -refreshToken");
 
     if (!user) {
       throw new ApiError(HTTP_STATUS.NOT_FOUND, ADMIN_MESSAGES.USER_NOT_FOUND);
@@ -158,12 +203,30 @@ export class AdminService {
     return user;
   }
 
+  static async deleteUser(userId: string) {
+    const user = await User.findById(userId);
+    if (!user) {
+      throw new ApiError(HTTP_STATUS.NOT_FOUND, ADMIN_MESSAGES.USER_NOT_FOUND);
+    }
+
+    const now = new Date();
+    user.isDeleted = true;
+    user.deletedAt = now;
+    await user.save();
+
+    await UserProfile.findOneAndUpdate({ userId }, { $set: { isDeleted: true, deletedAt: now } }).catch(() => null);
+    await JobSeekerProfile.findOneAndUpdate({ userId }, { $set: { isDeleted: true, deletedAt: now } }).catch(() => null);
+    await RecruiterProfile.findOneAndUpdate({ userId }, { $set: { isDeleted: true, deletedAt: now } }).catch(() => null);
+
+    return;
+  }
+
   static async getAllJobs(params: PaginationParams = {}) {
     const page = Math.max(1, Number(params.page) || 1);
     const limit = Math.max(1, Number(params.limit) || 10);
     const skip = (page - 1) * limit;
 
-    const filter: any = {};
+    const filter: any = { isDeleted: { $ne: true } };
 
     if (params.employmentType && params.employmentType !== "ALL") {
       filter.employmentType = params.employmentType;
@@ -177,7 +240,7 @@ export class AdminService {
     const [items, totalItems] = await Promise.all([
       Job.find(filter)
         .populate("companyId", "companyName logo")
-        .populate("recruiterId", "email")
+        .populate("userId", "email")
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit),
@@ -202,7 +265,9 @@ export class AdminService {
       throw new ApiError(HTTP_STATUS.NOT_FOUND, ADMIN_MESSAGES.JOB_NOT_FOUND);
     }
 
-    await job.deleteOne();
+    job.isDeleted = true;
+    job.deletedAt = new Date();
+    await job.save();
     return;
   }
 
@@ -211,7 +276,7 @@ export class AdminService {
     const limit = Math.max(1, Number(params.limit) || 10);
     const skip = (page - 1) * limit;
 
-    const filter: any = {};
+    const filter: any = { isDeleted: { $ne: true } };
 
     if (params.status && params.status !== "ALL") {
       filter.status = params.status;
@@ -219,7 +284,7 @@ export class AdminService {
 
     const [items, totalItems] = await Promise.all([
       Application.find(filter)
-        .populate("applicantId")
+        .populate("userId")
         .populate({
           path: "jobId",
           populate: {
@@ -240,6 +305,48 @@ export class AdminService {
       totalPages,
       currentPage: page,
       limit,
+    };
+  }
+
+  static async getMembershipStats() {
+    const [
+      totalRevenueResult,
+      successfulPayments,
+      failedPayments,
+      activeSubscriptions,
+      expiredSubscriptions,
+      seekerSubscribers,
+      recruiterSubscribers,
+      recentTransactions,
+    ] = await Promise.all([
+      Payment.aggregate([
+        { $match: { status: { $in: ["CAPTURED", "SUCCESS"] } } },
+        { $group: { _id: null, total: { $sum: "$amount" } } },
+      ]),
+      Payment.countDocuments({ status: { $in: ["CAPTURED", "SUCCESS"] } }),
+      Payment.countDocuments({ status: "FAILED" }),
+      Subscription.countDocuments({ status: "ACTIVE" }),
+      Subscription.countDocuments({ status: "EXPIRED" }),
+      Subscription.countDocuments({ status: "ACTIVE", role: Role.JOB_SEEKER }),
+      Subscription.countDocuments({ status: "ACTIVE", role: Role.RECRUITER }),
+      Payment.find()
+        .populate("userId", "email role")
+        .populate("membershipId", "name role price")
+        .sort({ createdAt: -1 })
+        .limit(10),
+    ]);
+
+    const totalRevenueInRupees = (totalRevenueResult[0]?.total || 0) / 100;
+
+    return {
+      totalRevenue: totalRevenueInRupees,
+      successfulPayments,
+      failedPayments,
+      activeSubscriptions,
+      expiredSubscriptions,
+      seekerSubscribers,
+      recruiterSubscribers,
+      recentTransactions,
     };
   }
 }

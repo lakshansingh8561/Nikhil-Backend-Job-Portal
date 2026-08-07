@@ -143,7 +143,7 @@ export class RecruiterService {
         const recObj = rec.toObject();
         const recUserId = typeof rec.userId === "object" && rec.userId !== null ? (rec.userId as any)._id : rec.userId;
         const openJobsCount = await Job.countDocuments({
-          recruiterId: recUserId,
+          userId: recUserId,
           isActive: true,
         });
         return {

@@ -15,4 +15,6 @@ export const CHAT_MESSAGES = {
   CANNOT_EDIT_MESSAGE: "You can only edit your own text messages within 10 minutes of sending",
   CANNOT_DELETE_MESSAGE: "You can only delete your own messages",
   INVALID_PARTICIPANTS: "Invalid participants for chat conversation",
+  CANNOT_CHAT_SELF: "You cannot start a chat conversation with yourself",
+  RECIPIENT_NOT_FOUND: "Recipient user not found",
 };

@@ -1,73 +1,24 @@
 import { Schema, model } from "mongoose";
 import { IJobSeekerProfile } from "./jobSeekerProfile.interface";
 
-const educationSchema = new Schema(
-  {
-    institution: {
-      type: String,
-      trim: true,
-    },
+const educationSchema = new Schema({
+  institution: { type: String, required: true, trim: true },
+  degree: { type: String, required: true, trim: true },
+  fieldOfStudy: { type: String, default: "", trim: true },
+  startDate: { type: Date },
+  endDate: { type: Date },
+  currentlyStudying: { type: Boolean, default: false },
+});
 
-    degree: {
-      type: String,
-      trim: true,
-    },
-
-    fieldOfStudy: {
-      type: String,
-      trim: true,
-    },
-
-    startDate: Date,
-
-    endDate: Date,
-
-    currentlyStudying: {
-      type: Boolean,
-      default: false,
-    },
-  },
-  {
-    _id: false,
-  }
-);
-
-const experienceSchema = new Schema(
-  {
-    company: {
-      type: String,
-      trim: true,
-    },
-
-    designation: {
-      type: String,
-      trim: true,
-    },
-
-    employmentType: {
-      type: String,
-      default: "FULL_TIME",
-      trim: true,
-    },
-
-    startDate: Date,
-
-    endDate: Date,
-
-    currentlyWorking: {
-      type: Boolean,
-      default: false,
-    },
-
-    description: {
-      type: String,
-      default: "",
-    },
-  },
-  {
-    _id: false,
-  }
-);
+const experienceSchema = new Schema({
+  company: { type: String, required: true, trim: true },
+  designation: { type: String, required: true, trim: true },
+  employmentType: { type: String, default: "Full-Time", trim: true },
+  startDate: { type: Date },
+  endDate: { type: Date },
+  currentlyWorking: { type: Boolean, default: false },
+  description: { type: String, default: "", trim: true },
+});
 
 const jobSeekerProfileSchema = new Schema<IJobSeekerProfile>(
   {
@@ -76,58 +27,37 @@ const jobSeekerProfileSchema = new Schema<IJobSeekerProfile>(
       ref: "User",
       required: true,
       unique: true,
+      index: true,
     },
-
-    firstName: {
+    resumeUrl: {
       type: String,
-      required: true,
+      default: "",
       trim: true,
     },
-
-    lastName: {
-      type: String,
-      required: true,
-      trim: true,
-    },
-
-    phone: {
-      type: String,
-      required: true,
-      trim: true,
-    },
-
-    headline: String,
-
-    bio: String,
-
-    currentLocation: String,
-
     yearsOfExperience: {
       type: Number,
       default: 0,
       min: 0,
     },
-
-    expectedSalary: Number,
-
-    skills: {
-      type: [String],
-      default: [],
+    expectedSalary: {
+      type: Number,
+      default: 0,
     },
-
-    education: {
-      type: [educationSchema],
-      default: [],
+    noticePeriodDays: {
+      type: Number,
+      default: 0,
     },
-
-    experience: {
-      type: [experienceSchema],
-      default: [],
+    education: [educationSchema],
+    experience: [experienceSchema],
+    isDeleted: {
+      type: Boolean,
+      default: false,
+      index: true,
     },
-
-    resume: String,
-
-    profilePicture: String,
+    deletedAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,

@@ -1,6 +1,5 @@
 import { Schema, model } from "mongoose";
 import { IApplication } from "./application.interface";
-import { ApplicationStatus } from "../../../common/enums/applicationStatus.enum";
 
 const applicationSchema = new Schema<IApplication>(
   {
@@ -10,29 +9,49 @@ const applicationSchema = new Schema<IApplication>(
       required: true,
       index: true,
     },
-
-    applicantId: {
+    userId: {
       type: Schema.Types.ObjectId,
       ref: "User",
       required: true,
       index: true,
     },
-
-    resume: {
+    resumeUrl: {
       type: String,
       required: true,
       trim: true,
     },
-
     coverLetter: {
       type: String,
       default: "",
+      trim: true,
     },
-
     status: {
       type: String,
-      enum: Object.values(ApplicationStatus),
-      default: ApplicationStatus.APPLIED,
+      enum: [
+        "SUBMITTED",
+        "UNDER_REVIEW",
+        "SHORTLISTED",
+        "INTERVIEW",
+        "INTERVIEW_SCHEDULED",
+        "OFFERED",
+        "REJECTED",
+        "WITHDRAWN",
+      ],
+      default: "SUBMITTED",
+      index: true,
+    },
+    appliedAt: {
+      type: Date,
+      default: Date.now,
+    },
+    isDeleted: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    deletedAt: {
+      type: Date,
+      default: null,
     },
   },
   {
@@ -40,21 +59,9 @@ const applicationSchema = new Schema<IApplication>(
   }
 );
 
-/*
-|--------------------------------------------------------------------------
-| Prevent Duplicate Applications
-|--------------------------------------------------------------------------
-*/
-
-applicationSchema.index(
-  {
-    jobId: 1,
-    applicantId: 1,
-  },
-  {
-    unique: true,
-  }
-);
+applicationSchema.index({ jobId: 1, candidateId: 1 }, { unique: true });
+applicationSchema.index({ candidateId: 1, status: 1 });
+applicationSchema.index({ jobId: 1, status: 1 });
 
 export const Application = model<IApplication>(
   "Application",

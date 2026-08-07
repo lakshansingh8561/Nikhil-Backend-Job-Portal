@@ -1,9 +1,4 @@
-import {
-  Application,
-  Job,
-  JobSeekerProfile,
-  User,
-} from "../../database/models";
+import { Application, ApplicationStatusHistory, Job, User, UserProfile } from "../../database/models";
 import { ApiError } from "../../common/utils/ApiError";
 import { HTTP_STATUS } from "../../common/constants/httpStatus";
 import { APPLICATION_MESSAGES } from "./application.constants";
@@ -11,8 +6,8 @@ import {
   ApplyJobInput,
   UpdateApplicationStatusInput,
 } from "./application.types";
-import { NotificationService } from "../notifications/notification.service";
 import { EmailService } from "../../common/services/email.service";
+import { NotificationService } from "../notifications/notification.service";
 
 export class ApplicationService {
   static async applyJob(
@@ -20,57 +15,49 @@ export class ApplicationService {
     jobId: string,
     payload: ApplyJobInput
   ) {
-    const profile = await JobSeekerProfile.findOne({
+    const job = await Job.findById(jobId).populate("companyId");
+    if (!job) {
+      throw new ApiError(
+        HTTP_STATUS.NOT_FOUND,
+        APPLICATION_MESSAGES.APPLICATION_NOT_FOUND
+      );
+    }
+
+    if (job.status !== "ACTIVE") {
+      throw new ApiError(
+        HTTP_STATUS.BAD_REQUEST,
+        APPLICATION_MESSAGES.JOB_CLOSED
+      );
+    }
+
+    const existingApplication = await Application.findOne({
+      jobId,
       userId,
     });
 
-    if (!profile) {
+    if (existingApplication) {
       throw new ApiError(
         HTTP_STATUS.BAD_REQUEST,
-        "Please complete your Job Seeker profile."
-      );
-    }
-
-    const job = await Job.findById(jobId).populate("companyId");
-
-    if (!job || !job.isActive) {
-      throw new ApiError(
-        HTTP_STATUS.NOT_FOUND,
-        APPLICATION_MESSAGES.JOB_CLOSED
-      );
-    }
-
-    if (job.deadline < new Date()) {
-      throw new ApiError(
-        HTTP_STATUS.BAD_REQUEST,
-        APPLICATION_MESSAGES.JOB_CLOSED
-      );
-    }
-
-    const alreadyApplied = await Application.findOne({
-      jobId,
-      applicantId: userId,
-    });
-
-    if (alreadyApplied) {
-      throw new ApiError(
-        HTTP_STATUS.CONFLICT,
         APPLICATION_MESSAGES.APPLICATION_ALREADY_EXISTS
       );
     }
 
     const application = await Application.create({
       jobId,
-      applicantId: userId,
-      resume: payload.resume,
+      userId,
+      resumeUrl: payload.resume,
       coverLetter: payload.coverLetter,
+      status: "SUBMITTED",
     });
 
+    const profile = await UserProfile.findOne({ userId });
     const applicantUser = await User.findById(userId);
-    const applicantFullName = `${profile.firstName || ""} ${profile.lastName || ""}`.trim() || applicantUser?.email?.split("@")[0] || "Candidate";
-    const companyName = (job.companyId as any)?.companyName || "Hiring Company";
+    const applicantFullName = profile
+      ? `${profile.firstName} ${profile.lastName}`.trim()
+      : applicantUser?.email?.split("@")[0] || "Candidate";
 
-    // 1. Send confirmation email to Job Seeker (Applicant)
+    const companyName = (job.companyId as any)?.name || "Hiring Company";
+
     if (applicantUser?.email) {
       EmailService.sendApplicationConfirmationToJobSeeker({
         applicantEmail: applicantUser.email,
@@ -80,12 +67,11 @@ export class ApplicationService {
       }).catch((err) => console.error("Job seeker confirmation email failed:", err));
     }
 
-    // 2. Notify Recruiter via in-app Notification & SMTP Email
-    if (job.recruiterId) {
-      const recruiterUser = await User.findById(job.recruiterId);
+    if (job.userId) {
+      const recruiterUser = await User.findById(job.userId);
 
       await NotificationService.createNotification({
-        recipientId: job.recruiterId.toString(),
+        recipientId: job.userId.toString(),
         senderId: userId,
         type: "APPLICATION_SUBMITTED",
         title: "New Applicant Received",
@@ -110,7 +96,7 @@ export class ApplicationService {
 
   static async getMyApplications(userId: string) {
     return Application.find({
-      applicantId: userId,
+      userId,
     })
       .populate({
         path: "jobId",
@@ -124,29 +110,29 @@ export class ApplicationService {
   }
 
   static async getRecruiterAllApplications(recruiterId: string) {
-    const recruiterJobs = await Job.find({ recruiterId }).select("_id");
+    const recruiterJobs = await Job.find({ userId: recruiterId }).select("_id");
     const jobIds = recruiterJobs.map((j) => j._id);
 
     const applications = await Application.find({ jobId: { $in: jobIds } })
       .populate("jobId", "title location companyId")
-      .populate("applicantId", "email role")
+      .populate("userId", "email role")
       .sort({ createdAt: -1 })
       .lean();
 
     const result = await Promise.all(
       applications.map(async (app) => {
-        const applicantUserId =
-          typeof app.applicantId === "object" && app.applicantId !== null
-            ? (app.applicantId as any)._id
-            : app.applicantId;
+        const candidateUserId =
+          typeof app.userId === "object" && app.userId !== null
+            ? (app.userId as any)._id
+            : app.userId;
 
-        const profile = await JobSeekerProfile.findOne({
-          userId: applicantUserId,
+        const profile = await UserProfile.findOne({
+          userId: candidateUserId,
         }).lean();
 
-        const applicantUser =
-          typeof app.applicantId === "object" && app.applicantId !== null
-            ? (app.applicantId as any)
+        const candidateUser =
+          typeof app.userId === "object" && app.userId !== null
+            ? (app.userId as any)
             : null;
 
         return {
@@ -159,7 +145,7 @@ export class ApplicationService {
                 headline: profile.headline || "",
               }
             : {
-                firstName: applicantUser?.email ? applicantUser.email.split("@")[0] : "Applicant",
+                firstName: candidateUser?.email ? candidateUser.email.split("@")[0] : "Applicant",
                 lastName: "",
                 profilePicture: "",
                 headline: "",
@@ -177,7 +163,7 @@ export class ApplicationService {
   ) {
     const job = await Job.findOne({
       _id: jobId,
-      recruiterId,
+      userId: recruiterId,
     });
 
     if (!job) {
@@ -190,17 +176,16 @@ export class ApplicationService {
     const applications = await Application.find({
       jobId,
     })
-      .populate("applicantId")
+      .populate("userId")
       .sort({
         createdAt: -1,
       });
 
-    // Notify candidates that their application was viewed by recruiter (In-app + Email)
     for (const app of applications) {
-      const applicantUserId = app.applicantId?._id || app.applicantId;
-      if (applicantUserId) {
+      const candidateUserId = (app.userId as any)?._id || app.userId;
+      if (candidateUserId) {
         NotificationService.createNotification({
-          recipientId: applicantUserId.toString(),
+          recipientId: candidateUserId.toString(),
           senderId: recruiterId,
           type: "APPLICATION_VIEWED",
           title: "Application Reviewed",
@@ -208,7 +193,7 @@ export class ApplicationService {
           link: "/job-seeker/applications",
         }).catch(() => null);
 
-        User.findById(applicantUserId).then((applicantUser) => {
+        User.findById(candidateUserId).then((applicantUser) => {
           if (applicantUser?.email) {
             EmailService.sendApplicationViewedToJobSeeker({
               applicantEmail: applicantUser.email,
@@ -228,8 +213,7 @@ export class ApplicationService {
     applicationId: string,
     payload: UpdateApplicationStatusInput
   ) {
-    const application =
-      await Application.findById(applicationId);
+    const application = await Application.findById(applicationId);
 
     if (!application) {
       throw new ApiError(
@@ -240,7 +224,7 @@ export class ApplicationService {
 
     const job = await Job.findOne({
       _id: application.jobId,
-      recruiterId,
+      userId: recruiterId,
     });
 
     if (!job) {
@@ -250,36 +234,36 @@ export class ApplicationService {
       );
     }
 
-    application.status = payload.status;
+    const oldStatus = application.status;
+    application.status = payload.status as any;
     await application.save();
 
-    // Fetch candidate details for notification and email
-    const applicantUser = await User.findById(application.applicantId);
-    const applicantProfile = await JobSeekerProfile.findOne({ userId: application.applicantId });
-    const applicantName = applicantProfile
-      ? `${applicantProfile.firstName || ""} ${applicantProfile.lastName || ""}`.trim() || applicantUser?.email?.split("@")[0] || "Candidate"
-      : applicantUser?.email?.split("@")[0] || "Candidate";
+    await ApplicationStatusHistory.create({
+      applicationId: application._id,
+      oldStatus,
+      newStatus: payload.status,
+      changedByUserId: recruiterId,
+    }).catch(() => null);
 
-    // Notify Job Seeker about status update!
+    const candidateUser = await User.findById(application.userId);
+    const candidateProfile = await UserProfile.findOne({ userId: application.userId });
+    const applicantName = candidateProfile
+      ? `${candidateProfile.firstName || ""} ${candidateProfile.lastName || ""}`.trim()
+      : candidateUser?.email?.split("@")[0] || "Candidate";
+
     let title = `Application Status Updated: ${payload.status}`;
     let message = `Your application for "${job.title}" has been updated to ${payload.status}.`;
 
     if (payload.status === "INTERVIEW") {
       title = "Interview Invitation!";
-      message = `You have been selected for an interview for "${job.title}". Please prepare and check your application details.`;
+      message = `You have been selected for an interview for "${job.title}".`;
     } else if (payload.status === "SHORTLISTED") {
       title = "Application Shortlisted!";
       message = `Great news! Your profile has been shortlisted for "${job.title}".`;
-    } else if (payload.status === "HIRED") {
-      title = "Congratulations! You're Hired!";
-      message = `Congratulations! The hiring team selected you for "${job.title}".`;
-    } else if (payload.status === "REJECTED") {
-      title = "Application Update";
-      message = `Thank you for applying. Unfortunately, your application for "${job.title}" was not selected at this time.`;
     }
 
     await NotificationService.createNotification({
-      recipientId: application.applicantId.toString(),
+      recipientId: application.userId.toString(),
       senderId: recruiterId,
       type: "STATUS_UPDATED",
       title,
@@ -287,9 +271,9 @@ export class ApplicationService {
       link: "/job-seeker/applications",
     }).catch(() => null);
 
-    if (applicantUser?.email) {
+    if (candidateUser?.email) {
       EmailService.sendStatusUpdateToJobSeeker({
-        applicantEmail: applicantUser.email,
+        applicantEmail: candidateUser.email,
         applicantName,
         jobTitle: job.title,
         status: payload.status,

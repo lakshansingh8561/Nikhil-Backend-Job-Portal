@@ -38,7 +38,7 @@ export const setupSocketHandlers = (io: Server) => {
 
         const conversation = await Conversation.findOne({
           _id: data.conversationId,
-          participants: userId,
+          "members.userId": userId,
         });
 
         if (!conversation) {
@@ -50,10 +50,11 @@ export const setupSocketHandlers = (io: Server) => {
         socket.join(`conversation:${data.conversationId}`);
         socket.join(`conversation_${data.conversationId}`);
 
-        // Check if other participant is online
-        const otherParticipantId = conversation.participants
-          .find((p) => p.toString() !== userId)
-          ?.toString();
+        // Check if other member is online
+        const otherMember = conversation.members.find(
+          (m: any) => m.userId.toString() !== userId
+        );
+        const otherParticipantId = otherMember?.userId?.toString();
 
         const isOtherOnline = otherParticipantId
           ? onlineUsers.has(otherParticipantId) &&
@@ -102,64 +103,12 @@ export const setupSocketHandlers = (io: Server) => {
           }
         );
 
-        const receiverId = (message.receiver as any)?.toString();
-        let isReceiverOnline = false;
-
-        if (receiverId) {
-          isReceiverOnline =
-            onlineUsers.has(receiverId) &&
-            onlineUsers.get(receiverId)!.size > 0;
-
-          if (isReceiverOnline) {
-            // Update message status to delivered immediately
-            const updated = await Message.findByIdAndUpdate(
-              message._id || message.id,
-              {
-                status: "delivered",
-                delivered: true,
-                deliveredAt: new Date(),
-              },
-              { new: true }
-            ).lean();
-
-            if (updated) {
-              (message as any).status = "delivered";
-              (message as any).delivered = true;
-              (message as any).deliveredAt = updated.deliveredAt;
-            }
-          }
-
-          // Emit real-time notification & conversation updates to receiver's user room
-          io.to(`user:${receiverId}`).emit("conversation-updated", {
-            conversationId: data.conversationId,
-            message,
-          });
-          io.to(`user:${receiverId}`).emit("conversation_updated", {
-            conversationId: data.conversationId,
-            message,
-          });
-          io.to(`user:${receiverId}`).emit("new-message-notification", {
-            conversationId: data.conversationId,
-            message,
-          });
-        }
-
         // Broadcast to conversation rooms
-        const convRoom1 = `conversation:${data.conversationId}`;
-        const convRoom2 = `conversation_${data.conversationId}`;
+        const room1 = `conversation:${data.conversationId}`;
+        const room2 = `conversation_${data.conversationId}`;
 
-        io.to(convRoom1).to(convRoom2).emit("receive-message", message);
-        io.to(convRoom1).to(convRoom2).emit("receive_message", message);
-
-        // Notify sender room as well
-        io.to(`user:${userId}`).emit("conversation-updated", {
-          conversationId: data.conversationId,
-          message,
-        });
-        io.to(`user:${userId}`).emit("conversation_updated", {
-          conversationId: data.conversationId,
-          message,
-        });
+        io.to(room1).to(room2).emit("receive-message", message);
+        io.to(room1).to(room2).emit("receive_message", message);
       } catch (err: any) {
         socket.emit("error", {
           message: err.message || "Failed to send message",
@@ -220,11 +169,12 @@ export const setupSocketHandlers = (io: Server) => {
         // Update user unread count
         const conversation = await Conversation.findById(data.conversationId);
         if (conversation) {
-          conversation.participants.forEach((pId) => {
-            io.to(`user:${pId.toString()}`).emit("unread-count-updated", {
+          conversation.members.forEach((m: any) => {
+            const pId = m.userId.toString();
+            io.to(`user:${pId}`).emit("unread-count-updated", {
               conversationId: data.conversationId,
             });
-            io.to(`user:${pId.toString()}`).emit("unread_count_updated", {
+            io.to(`user:${pId}`).emit("unread_count_updated", {
               conversationId: data.conversationId,
             });
           });

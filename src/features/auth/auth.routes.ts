@@ -41,6 +41,12 @@ router.post(
   authenticate,
   AuthController.logout
 );
+
+router.post(
+  "/change-password",
+  authenticate,
+  AuthController.changePassword
+);
 router.get(
   "/admin",
   authenticate,

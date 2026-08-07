@@ -1,0 +1,778 @@
+const userSchema = new Schema<IUser>(
+  {
+    email: {
+      type: String,
+      required: true,
+      unique: true,
+      trim: true,
+      lowercase: true,
+    },
+    password: {
+      type: String,
+      required: true,
+      minlength: 8,
+      select: false,
+    },
+
+    role: {
+      type: String,
+      enum: Object.values(Role),
+      default: Role.JOB_SEEKER,
+      required: true,
+    },
+
+    status: {
+      type: String,
+      enum: Object.values(UserStatus),
+      default: UserStatus.ACTIVE,
+    },
+
+    isVerified: {
+      type: Boolean,
+      default: false,
+    },
+
+    lastLogin: {
+      type: Date,
+    },
+      refreshToken: {
+      type: String,
+      default: null,
+      select: false,
+    },
+
+    location: {
+      city: { type: String, default: "" },
+      state: { type: String, default: "" },
+      country: { type: String, default: "" },
+      postalCode: { type: String, default: "" },
+      latitude: { type: Number, default: 0 },
+      longitude: { type: Number, default: 0 },
+    },
+  },
+  {
+    timestamps: true,
+  }
+);
+
+recruiter --
+
+
+const recruiterProfileSchema = new Schema<IRecruiterProfile>(
+  {
+    userId: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+      unique: true,
+    },
+
+    firstName: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    lastName: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    phone: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    designation: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    currentCompany: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    experience: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
+    currentLocation: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    headline: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    bio: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    linkedin: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    github: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    portfolio: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    profilePicture: {
+      type: String,
+      default: "",
+    },
+
+    companyId: {
+      type: Schema.Types.ObjectId,
+      ref: "Company",
+      default: null,
+    },
+  },
+  {
+    timestamps: true,
+  }
+);
+
+job--
+
+const jobSchema = new Schema<IJob>(
+  {
+    title: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    description: {
+      type: String,
+      required: true,
+    },
+
+    companyId: {
+      type: Schema.Types.ObjectId,
+      ref: "Company",
+      required: true,
+    },
+
+    recruiterId: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
+
+    location: {
+      type: String,
+      required: true,
+    },
+
+    salaryMin: {
+      type: Number,
+      required: true,
+    },
+
+    salaryMax: {
+      type: Number,
+      required: true,
+    },
+
+    employmentType: {
+      type: String,
+      enum: Object.values(EmploymentType),
+      required: true,
+    },
+
+    experienceLevel: {
+      type: String,
+      enum: Object.values(ExperienceLevel),
+      required: true,
+    },
+
+    skills: [
+      {
+        type: String,
+        trim: true,
+      },
+    ],
+
+    vacancies: {
+      type: Number,
+      default: 1,
+      min: 1,
+    },
+
+    deadline: {
+      type: Date,
+      required: true,
+    },
+
+    isActive: {
+      type: Boolean,
+      default: true,
+    },
+  },
+  {
+    timestamps: true,
+  }
+);
+
+jobSchema.index({ title: "text", description: "text" });
+jobSchema.index({ companyId: 1 });
+jobSchema.index({ recruiterId: 1 });
+jobSchema.index({ location: 1 });
+
+export const Job = model<IJob>("Job", jobSchema);
+
+
+company--
+
+const companySchema = new Schema<ICompany>(
+  {
+    ownerId: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
+
+    companyName: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    tagline: {
+      type: String,
+      default: "",
+    },
+
+    description: {
+      type: String,
+      default: "",
+    },
+
+    mission: {
+      type: String,
+      default: "",
+    },
+
+    vision: {
+      type: String,
+      default: "",
+    },
+
+    industry: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    companySize: {
+      type: String,
+      required: true,
+    },
+
+    website: {
+      type: String,
+      default: "",
+    },
+
+    email: {
+      type: String,
+      default: "",
+    },
+
+    phone: {
+      type: String,
+      default: "",
+    },
+
+    logo: {
+      type: String,
+      default: "",
+    },
+
+    coverImage: {
+      type: String,
+      default: "",
+    },
+
+    foundedYear: {
+      type: Number,
+    },
+
+    headquarters: {
+      type: String,
+      default: "",
+    },
+
+    address: {
+      type: String,
+      default: "",
+    },
+
+    city: {
+      type: String,
+      default: "",
+    },
+
+    state: {
+      type: String,
+      default: "",
+    },
+
+    country: {
+      type: String,
+      default: "",
+    },
+
+    linkedin: {
+      type: String,
+      default: "",
+    },
+
+    facebook: {
+      type: String,
+      default: "",
+    },
+
+    twitter: {
+      type: String,
+      default: "",
+    },
+
+    instagram: {
+      type: String,
+      default: "",
+    },
+
+    github: {
+      type: String,
+      default: "",
+    },
+
+    youtube: {
+      type: String,
+      default: "",
+    },
+
+    officeImages: {
+      type: [String],
+      default: [],
+    },
+
+    isVerified: {
+      type: Boolean,
+      default: false,
+    },
+  },
+  {
+    timestamps: true,
+  }
+);
+
+export const Company = model<ICompany>("Company", companySchema);
+
+
+chat---
+
+import { Schema, model } from "mongoose";
+import { IConversation } from "./chat.interface";
+
+const conversationSchema = new Schema<IConversation>(
+  {
+    participants: [
+      {
+        type: Schema.Types.ObjectId,
+        ref: "User",
+        required: true,
+      },
+    ],
+
+    recruiter: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+      index: true,
+    },
+
+    jobSeeker: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+      index: true,
+    },
+
+    jobId: {
+      type: Schema.Types.ObjectId,
+      ref: "Job",
+      required: true,
+      index: true,
+    },
+
+    lastMessage: {
+      type: Schema.Types.ObjectId,
+      ref: "Message",
+      default: null,
+    },
+
+    lastMessageAt: {
+      type: Date,
+      default: Date.now,
+    },
+
+    unreadCounts: {
+      jobSeeker: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+      recruiter: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+    },
+  },
+  {
+    timestamps: true,
+  }
+);
+
+// Performance & uniqueness indexes
+conversationSchema.index(
+  { recruiter: 1, jobSeeker: 1, jobId: 1 },
+  { unique: true }
+);
+conversationSchema.index({ participants: 1 });
+conversationSchema.index({ updatedAt: -1 });
+
+export const Conversation = model<IConversation>(
+  "Conversation",
+  conversationSchema
+);
+
+
+
+const applicationSchema = new Schema<IApplication>(
+  {
+    jobId: {
+      type: Schema.Types.ObjectId,
+      ref: "Job",
+      required: true,
+      index: true,
+    },
+
+    applicantId: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+      index: true,
+    },
+
+    resume: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    coverLetter: {
+      type: String,
+      default: "",
+    },
+
+    status: {
+      type: String,
+      enum: Object.values(ApplicationStatus),
+      default: ApplicationStatus.APPLIED,
+    },
+  },
+  {
+    timestamps: true,
+  }
+);
+
+
+
+applicationSchema.index(
+  {
+    jobId: 1,
+    applicantId: 1,
+  },
+  {
+    unique: true,
+  }
+);
+
+
+
+messages----
+import { Schema, model } from "mongoose";
+import { IMessage } from "./chat.interface";
+
+const attachmentSchema = new Schema(
+  {
+    url: { type: String, required: true },
+    fileType: { type: String, required: true },
+    fileName: { type: String, required: true },
+  },
+  { _id: false }
+);
+
+const messageSchema = new Schema<IMessage>(
+  {
+    conversationId: {
+      type: Schema.Types.ObjectId,
+      ref: "Conversation",
+      required: true,
+      index: true,
+    },
+
+    sender: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+      index: true,
+    },
+
+    receiver: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+      index: true,
+    },
+
+    message: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    messageType: {
+      type: String,
+      enum: ["text", "image", "file"],
+      default: "text",
+    },
+
+    attachments: {
+      type: [attachmentSchema],
+      default: [],
+    },
+
+    status: {
+      type: String,
+      enum: ["sent", "delivered", "seen"],
+      default: "sent",
+    },
+
+    sentAt: {
+      type: Date,
+      default: Date.now,
+    },
+
+    read: {
+      type: Boolean,
+      default: false,
+    },
+
+    readAt: {
+      type: Date,
+      default: null,
+    },
+
+    seenAt: {
+      type: Date,
+      default: null,
+    },
+
+    delivered: {
+      type: Boolean,
+      default: false,
+    },
+
+    deliveredAt: {
+      type: Date,
+      default: null,
+    },
+
+    replyTo: {
+      type: Schema.Types.ObjectId,
+      ref: "Message",
+      default: null,
+    },
+
+    isEdited: {
+      type: Boolean,
+      default: false,
+    },
+
+    isDeleted: {
+      type: Boolean,
+      default: false,
+    },
+  },
+  {
+    timestamps: true,
+  }
+);
+
+messageSchema.index({ conversationId: 1, createdAt: -1 });
+messageSchema.index({ message: "text" });
+
+export const Message = model<IMessage>("Message", messageSchema);
+
+const educationSchema = new Schema(
+  {
+    institution: {
+      type: String,
+      trim: true,
+    },
+
+    degree: {
+      type: String,
+      trim: true,
+    },
+
+    fieldOfStudy: {
+      type: String,
+      trim: true,
+    },
+
+    startDate: Date,
+
+    endDate: Date,
+
+    currentlyStudying: {
+      type: Boolean,
+      default: false,
+    },
+  },
+  {
+    _id: false,
+  }
+);
+
+const experienceSchema = new Schema(
+  {
+    company: {
+      type: String,
+      trim: true,
+    },
+
+    designation: {
+      type: String,
+      trim: true,
+    },
+
+    employmentType: {
+      type: String,
+      default: "FULL_TIME",
+      trim: true,
+    },
+
+    startDate: Date,
+
+    endDate: Date,
+
+    currentlyWorking: {
+      type: Boolean,
+      default: false,
+    },
+
+    description: {
+      type: String,
+      default: "",
+    },
+  },
+  {
+    _id: false,
+  }
+);
+
+const jobSeekerProfileSchema = new Schema<IJobSeekerProfile>(
+  {
+    userId: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+      unique: true,
+    },
+
+    firstName: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    lastName: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    phone: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    headline: String,
+
+    bio: String,
+
+    currentLocation: String,
+
+    yearsOfExperience: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
+    expectedSalary: Number,
+
+    skills: {
+      type: [String],
+      default: [],
+    },
+
+    education: {
+      type: [educationSchema],
+      default: [],
+    },
+
+    experience: {
+      type: [experienceSchema],
+      default: [],
+    },
+
+    resume: String,
+
+    profilePicture: String,
+  },
+  {
+    timestamps: true,
+  }
+);
+
+
+

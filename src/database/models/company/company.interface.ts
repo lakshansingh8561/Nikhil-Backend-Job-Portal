@@ -1,61 +1,43 @@
 import { Document, Types } from "mongoose";
 
-export interface ICompany extends Document {
-  ownerId: Types.ObjectId;
+export type CompanyVerificationStatus = "PENDING" | "APPROVED" | "REJECTED";
 
-  companyName: string;
-
-  tagline?: string;
-
-  description?: string;
-
-  mission?: string;
-
-  vision?: string;
-
-  industry: string;
-
-  companySize: string;
-
-  website?: string;
-
-  email?: string;
-
-  phone?: string;
-
-  logo?: string;
-
-  coverImage?: string;
-
-  foundedYear?: number;
-
-  headquarters?: string;
-
-  address?: string;
-
+export interface ICompanyLocation {
   city?: string;
-
   state?: string;
-
   country?: string;
+  postalCode?: string;
+  address?: string;
+  latitude?: number;
+  longitude?: number;
+}
 
+export interface ICompanySocialLinks {
   linkedin?: string;
-
-  facebook?: string;
-
   twitter?: string;
-
-  instagram?: string;
-
   github?: string;
+  facebook?: string;
+  website?: string;
+}
 
-  youtube?: string;
-
-  officeImages?: string[];
-
-  isVerified: boolean;
-
+export interface ICompany extends Document {
+  name: string;
+  userId?: Types.ObjectId;
+  slug: string;
+  description?: string;
+  industry: string;
+  companySize: string;
+  email?: string;
+  phone?: string;
+  website?: string;
+  logo?: string;
+  coverImage?: string;
+  location?: ICompanyLocation;
+  socialLinks?: ICompanySocialLinks;
+  verificationStatus: CompanyVerificationStatus;
+  status: string;
+  isDeleted?: boolean;
+  deletedAt?: Date | null;
   createdAt: Date;
-
   updatedAt: Date;
 }

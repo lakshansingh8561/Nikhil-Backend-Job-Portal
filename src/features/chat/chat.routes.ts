@@ -32,6 +32,8 @@ router.post(
 );
 router.get("/conversations", ChatController.getUserConversations);
 router.get("/conversations/:id", ChatController.getConversationById);
+router.delete("/conversations/:id", ChatController.deleteConversation);
+
 
 // Message routes within conversation
 router.get("/conversations/:id/messages", ChatController.getMessages);

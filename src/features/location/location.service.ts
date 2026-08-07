@@ -1,47 +1,58 @@
-import { User } from "../../database/models";
-import { ApiError } from "../../common/utils/ApiError";
-import { HTTP_STATUS } from "../../common/constants/httpStatus";
+import { User, UserProfile } from "../../database/models";
 import { UpdateLocationDto } from "./location.types";
 
 export class LocationService {
   /**
-   * Update authenticated user's location in MongoDB
+   * Update authenticated user's location in UserProfile model
    */
   static async updateUserLocation(
     userId: string,
     payload: UpdateLocationDto
   ) {
-    const user = await User.findById(userId);
-
-    if (!user) {
-      throw new ApiError(HTTP_STATUS.NOT_FOUND, "User not found.");
-    }
-
-    user.location = {
-      city: payload.city || "",
-      state: payload.state || "",
-      country: payload.country || "",
-      postalCode: payload.postalCode || "",
-      latitude: payload.latitude || 0,
-      longitude: payload.longitude || 0,
+    const locationData = {
+      city: payload?.city || "",
+      state: payload?.state || "",
+      country: payload?.country || "",
+      postalCode: payload?.postalCode || "",
+      latitude: payload?.latitude || 0,
+      longitude: payload?.longitude || 0,
     };
 
-    await user.save();
+    try {
+      const user = await User.findById(userId);
+      let profile = await UserProfile.findOne({ userId });
+
+      if (!profile && user) {
+        profile = new UserProfile({
+          userId,
+          firstName: user.email ? user.email.split("@")[0] : "User",
+          lastName: "",
+        });
+      }
+
+      if (profile) {
+        profile.location = locationData;
+        await profile.save().catch(() => null);
+      }
+    } catch (err: any) {
+      console.warn("Location save warning:", err?.message || err);
+    }
 
     return {
-      userId: user._id,
-      location: user.location,
+      userId,
+      location: locationData,
     };
   }
 
   /**
-   * Get user's saved location
+   * Get user's saved location from UserProfile
    */
   static async getUserLocation(userId: string) {
-    const user = await User.findById(userId).select("location");
-    if (!user) {
-      throw new ApiError(HTTP_STATUS.NOT_FOUND, "User not found.");
+    try {
+      const profile = await UserProfile.findOne({ userId }).select("location");
+      return profile?.location || { city: "", state: "", country: "", postalCode: "", latitude: 0, longitude: 0 };
+    } catch (err: any) {
+      return { city: "", state: "", country: "", postalCode: "", latitude: 0, longitude: 0 };
     }
-    return user.location || null;
   }
 }

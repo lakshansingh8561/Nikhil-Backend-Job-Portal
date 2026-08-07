@@ -1,4 +1,4 @@
-import { User, JobSeekerProfile, RecruiterProfile } from "../../database/models";
+import { User, UserProfile, JobSeekerProfile, RecruiterProfile } from "../../database/models";
 import { ApiError } from "../../common/utils/ApiError";
 import { HTTP_STATUS } from "../../common/constants/httpStatus";
 import { AUTH_MESSAGES } from "./auth.constants";
@@ -40,7 +40,7 @@ export class AuthService {
     }
 
     const email = payload.email.toLowerCase();
-    let user = await User.findOne({ email }).select("+refreshToken");
+    let user = await User.findOne({ email });
 
     if (!user) {
       const randomPassword = await hashPassword(Math.random().toString(36).slice(-10) + Date.now().toString());
@@ -55,21 +55,25 @@ export class AuthService {
         isVerified: true,
       });
 
+      const initialFirstName = payload.given_name || email.split("@")[0];
+      const initialLastName = payload.family_name || "";
+
+      await UserProfile.create({
+        userId: user._id,
+        firstName: initialFirstName,
+        lastName: initialLastName,
+        profilePicture: payload.picture || "",
+      }).catch(() => null);
+
       if (user.role === Role.JOB_SEEKER) {
         await JobSeekerProfile.create({
-          userId: user.id,
-          firstName: payload.given_name || "Google",
-          lastName: payload.family_name || "User",
-          profilePicture: payload.picture || "",
+          userId: user._id,
+          yearsOfExperience: 0,
         }).catch(() => null);
       } else if (user.role === Role.RECRUITER) {
         await RecruiterProfile.create({
-          userId: user.id,
-          firstName: payload.given_name || "Google",
-          lastName: payload.family_name || "Recruiter",
-          phone: "N/A",
-          designation: "Hiring Manager",
-          profilePicture: payload.picture || "",
+          userId: user._id,
+          designation: "Recruiter",
         }).catch(() => null);
       }
     }
@@ -79,6 +83,7 @@ export class AuthService {
     }
 
     user.lastLogin = new Date();
+    await user.save();
 
     const jwtPayload: JwtPayload = {
       userId: user.id,
@@ -87,9 +92,6 @@ export class AuthService {
 
     const accessToken = generateAccessToken(jwtPayload);
     const refreshToken = generateRefreshToken(jwtPayload);
-
-    user.refreshToken = refreshToken;
-    await user.save();
 
     return {
       accessToken,
@@ -106,8 +108,9 @@ export class AuthService {
     payload: RegisterUserInput
   ): Promise<AuthResponse> {
     const { email, password, role } = payload;
+    const lowerEmail = email.toLowerCase().trim();
 
-    const existingUser = await User.findOne({ email });
+    const existingUser = await User.findOne({ email: lowerEmail });
 
     if (existingUser) {
       throw new ApiError(
@@ -119,23 +122,41 @@ export class AuthService {
     const hashedPassword = await hashPassword(password);
 
     const user = await User.create({
-      email,
+      email: lowerEmail,
       password: hashedPassword,
       role,
     });
-console.log("user", user)
+
+    const defaultFirstName = lowerEmail.split("@")[0];
+
+    // Create UserProfile
+    await UserProfile.create({
+      userId: user._id,
+      firstName: defaultFirstName,
+      lastName: "",
+    }).catch((err) => console.error("UserProfile creation error:", err));
+
+    // Create JobSeekerProfile or RecruiterProfile
+    if (role === Role.JOB_SEEKER) {
+      await JobSeekerProfile.create({
+        userId: user._id,
+        yearsOfExperience: 0,
+      }).catch((err) => console.error("JobSeekerProfile creation error:", err));
+    } else if (role === Role.RECRUITER) {
+      await RecruiterProfile.create({
+        userId: user._id,
+        designation: "Recruiter",
+      }).catch((err) => console.error("RecruiterProfile creation error:", err));
+    }
+
     const jwtPayload: JwtPayload = {
       userId: user.id,
       role: user.role,
     };
-    console.log("jwt----",jwtPayload)
 
     const accessToken = generateAccessToken(jwtPayload);
     const refreshToken = generateRefreshToken(jwtPayload);
 
-    user.refreshToken = refreshToken;
-    await user.save();
- console.log("user saved")
     return {
       accessToken,
       refreshToken,
@@ -151,10 +172,9 @@ console.log("user", user)
     payload: LoginUserInput
   ): Promise<AuthResponse> {
     const { email, password } = payload;
+    const lowerEmail = email.toLowerCase().trim();
 
-    const user = await User.findOne({ email }).select(
-      "+password +refreshToken"
-    );
+    const user = await User.findOne({ email: lowerEmail }).select("+password");
 
     if (!user) {
       throw new ApiError(
@@ -183,6 +203,7 @@ console.log("user", user)
     }
 
     user.lastLogin = new Date();
+    await user.save();
 
     const jwtPayload: JwtPayload = {
       userId: user.id,
@@ -191,10 +212,6 @@ console.log("user", user)
 
     const accessToken = generateAccessToken(jwtPayload);
     const refreshToken = generateRefreshToken(jwtPayload);
-
-    user.refreshToken = refreshToken;
-
-    await user.save();
 
     return {
       accessToken,
@@ -208,7 +225,7 @@ console.log("user", user)
   }
 
   static async logout(userId: string): Promise<void> {
-    const user = await User.findById(userId).select("+refreshToken");
+    const user = await User.findById(userId);
 
     if (!user) {
       throw new ApiError(
@@ -216,14 +233,10 @@ console.log("user", user)
         AUTH_MESSAGES.USER_NOT_FOUND
       );
     }
-
-    user.refreshToken = null;
-
-    await user.save();
   }
 
   static async getCurrentUser(userId: string) {
-    const user = await User.findById(userId).select("-password -refreshToken");
+    const user = await User.findById(userId).select("-password");
 
     if (!user) {
       throw new ApiError(
@@ -232,50 +245,89 @@ console.log("user", user)
       );
     }
 
-    return user;
+    let profileObj = await UserProfile.findOne({ userId }).lean();
+    if (!profileObj) {
+      await UserProfile.create({
+        userId: user._id,
+        firstName: user.email.split("@")[0],
+        lastName: "",
+      }).catch(() => null);
+      profileObj = await UserProfile.findOne({ userId }).lean();
+    }
+
+    return {
+      ...user.toObject(),
+      profile: profileObj,
+    };
   }
-static async refreshToken(token: string) {
-  const payload = verifyRefreshToken(token);
 
-  const user = await User.findById(payload.userId).select(
-    "+refreshToken"
-  );
+  static async refreshToken(token: string) {
+    const payload = verifyRefreshToken(token);
 
-  if (!user) {
-    throw new ApiError(
-      HTTP_STATUS.UNAUTHORIZED,
-      AUTH_MESSAGES.INVALID_REFRESH_TOKEN
-    );
+    const user = await User.findById(payload.userId);
+
+    if (!user) {
+      throw new ApiError(
+        HTTP_STATUS.UNAUTHORIZED,
+        AUTH_MESSAGES.INVALID_REFRESH_TOKEN
+      );
+    }
+
+    const jwtPayload: JwtPayload = {
+      userId: user.id,
+      role: user.role,
+    };
+
+    const accessToken = generateAccessToken(jwtPayload);
+    const refreshToken = generateRefreshToken(jwtPayload);
+
+    return {
+      accessToken,
+      refreshToken,
+    };
   }
 
-  if (
-    !user.refreshToken ||
-    user.refreshToken !== token
+  static async changePassword(
+    userId: string,
+    payload: { currentPassword?: string; newPassword?: string }
   ) {
-    throw new ApiError(
-      HTTP_STATUS.UNAUTHORIZED,
-      AUTH_MESSAGES.INVALID_REFRESH_TOKEN
-    );
+    const { currentPassword, newPassword } = payload;
+
+    if (!currentPassword || !newPassword) {
+      throw new ApiError(
+        HTTP_STATUS.BAD_REQUEST,
+        "Current password and new password are required."
+      );
+    }
+
+    if (newPassword.length < 6) {
+      throw new ApiError(
+        HTTP_STATUS.BAD_REQUEST,
+        "New password must be at least 6 characters long."
+      );
+    }
+
+    const user = await User.findById(userId).select("+password");
+    if (!user) {
+      throw new ApiError(
+        HTTP_STATUS.NOT_FOUND,
+        AUTH_MESSAGES.USER_NOT_FOUND
+      );
+    }
+
+    const isMatch = await comparePassword(currentPassword, user.password);
+    if (!isMatch) {
+      throw new ApiError(
+        HTTP_STATUS.UNAUTHORIZED,
+        "Current password is incorrect."
+      );
+    }
+
+    user.password = await hashPassword(newPassword);
+    await user.save();
+
+    return {
+      message: "Password changed successfully.",
+    };
   }
-
-  const jwtPayload: JwtPayload = {
-    userId: user.id,
-    role: user.role,
-  };
-
-  const accessToken = generateAccessToken(jwtPayload);
-
-  const refreshToken = generateRefreshToken(jwtPayload);
-
-  user.refreshToken = refreshToken;
-
-  await user.save();
-
-  return {
-    accessToken,
-    refreshToken,
-  };
-}
-
-  
 }
