@@ -55,6 +55,10 @@ app.get("/", (req, res) => {
   });
 });
 
+import path from "path";
+
+app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
+
 app.use("/api/v1", routes);
 
 app.use(notFoundMiddleware);

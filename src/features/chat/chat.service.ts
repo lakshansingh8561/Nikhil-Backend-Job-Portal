@@ -11,6 +11,7 @@ import {
 import { ApiError } from "../../common/utils/ApiError";
 import { HTTP_STATUS } from "../../common/constants/httpStatus";
 import { CHAT_MESSAGES } from "./chat.constants";
+import { NotificationService } from "../notifications/notification.service";
 import {
   CreateConversationDto,
   SendMessageDto,
@@ -310,10 +311,31 @@ export class ChatService {
       .limit(limit)
       .lean();
 
-    const chronologicalMessages = messages.reverse().map((msg) => ({
-      ...msg,
-      id: msg._id.toString(),
-    }));
+    const chronologicalMessages = messages.reverse().map((msg) => {
+      const readsArr = (msg as any).reads || [];
+      const senderStr = msg.sender ? msg.sender.toString() : "";
+      
+      const isSeenByRecipient = readsArr.some(
+        (r: any) => r.userId && r.userId.toString() !== senderStr
+      );
+
+      const isDelivered = (msg as any).status === "delivered" || (msg as any).delivered || readsArr.length > 0;
+
+      const status = isSeenByRecipient
+        ? "seen"
+        : isDelivered
+        ? "delivered"
+        : "sent";
+
+      return {
+        ...msg,
+        id: msg._id.toString(),
+        status,
+        read: isSeenByRecipient,
+        delivered: isDelivered,
+        reads: readsArr,
+      };
+    });
 
     return {
       messages: chronologicalMessages,
@@ -360,6 +382,54 @@ export class ChatService {
       lastMessageAt: message.createdAt,
     });
 
+    // Dispatch Bidirectional Chat In-App Notification to Recipient
+    try {
+      let recipientId = "";
+      if (conversation.participants && conversation.participants.length > 0) {
+        const otherP = conversation.participants.find((p: any) => p.toString() !== userId);
+        if (otherP) recipientId = otherP.toString();
+      }
+      if (!recipientId && conversation.members && conversation.members.length > 0) {
+        const otherM = conversation.members.find((m: any) => m.userId.toString() !== userId);
+        if (otherM) recipientId = otherM.userId.toString();
+      }
+
+      if (recipientId) {
+        const senderUser = await User.findById(userId).select("role email").lean();
+        const senderProfile = await UserProfile.findOne({ userId }).lean();
+        const senderRecruiter = await RecruiterProfile.findOne({ userId }).populate("companyId", "name companyName").lean();
+
+        const senderFirstName = senderProfile?.firstName || (senderUser?.email ? senderUser.email.split("@")[0] : "User");
+        const senderLastName = senderProfile?.lastName || "";
+        const senderName = `${senderFirstName} ${senderLastName}`.trim();
+        const companyName = (senderRecruiter?.companyId as any)?.name || (senderRecruiter?.companyId as any)?.companyName || "";
+
+        const isRecruiterSender = senderUser?.role === Role.RECRUITER;
+        
+        const title = isRecruiterSender
+          ? `New Message from Recruiter (${companyName || senderName})`
+          : `New Message from Candidate (${senderName})`;
+
+        const link = isRecruiterSender
+          ? `/job-seeker/messages?conversationId=${conversationId}`
+          : `/recruiter/messages?conversationId=${conversationId}`;
+
+        const msgText = data.message.trim();
+        const excerpt = msgText.length > 60 ? `${msgText.substring(0, 60)}...` : msgText;
+
+        await NotificationService.createNotification({
+          recipientId,
+          senderId: userId,
+          type: "CHAT_MESSAGE",
+          title,
+          message: `${senderName}: "${excerpt}"`,
+          link,
+        });
+      }
+    } catch (notifErr) {
+      console.error("[ChatService] Failed to dispatch chat notification:", notifErr);
+    }
+
     const populatedMessage = await Message.findById(message._id)
       .populate("replyTo", "message sender isDeleted")
       .lean();
@@ -367,6 +437,9 @@ export class ChatService {
     return {
       ...populatedMessage,
       id: message._id.toString(),
+      status: "delivered",
+      delivered: true,
+      read: false,
     };
   }
 

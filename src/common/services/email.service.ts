@@ -448,4 +448,82 @@ export class EmailService {
     `;
     return this.sendMail({ to: email, subject, html });
   }
+
+  /**
+   * 6. Send email notification to Admin when a new User or Recruiter signs up or logs in
+   */
+  public static async sendAdminUserActivityNotification({
+    userEmail,
+    role,
+    actionType,
+    userFullName = "",
+  }: {
+    userEmail: string;
+    role: string;
+    actionType: "SIGNUP" | "LOGIN";
+    userFullName?: string;
+  }) {
+    const adminEmail = process.env.ADMIN_NOTIFY_EMAIL || process.env.EMAIL_USER || "lakshansingh8561@gmail.com";
+    const actionLabel = actionType === "SIGNUP" ? "🆕 New User Registration" : "🔑 User Login Event";
+    const subject = `[JobBox Admin Alert] ${actionLabel}: ${userEmail} (${role})`;
+
+    const formattedTime = new Date().toLocaleString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f5f7fc; margin: 0; padding: 0; }
+          .container { max-width: 600px; margin: 30px auto; background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.08); border: 1px solid #eaeff7; }
+          .header { background: linear-gradient(135deg, #05264E 0%, #1D4ED8 100%); padding: 32px 24px; text-align: center; color: #ffffff; }
+          .header h1 { margin: 0; font-size: 22px; font-weight: 800; }
+          .header p { margin: 6px 0 0; font-size: 13px; opacity: 0.9; }
+          .content { padding: 32px 24px; color: #05264E; }
+          .card { background: #f8fafc; border-radius: 14px; padding: 20px; border: 1px solid #eaeff7; margin: 20px 0; }
+          .info-row { font-size: 13px; margin-bottom: 10px; color: #66789c; display: flex; justify-content: space-between; }
+          .info-row strong { color: #05264E; font-weight: 700; }
+          .role-pill { background: #E8F0FE; color: #1D4ED8; font-weight: 800; padding: 3px 10px; border-radius: 8px; font-size: 11px; text-transform: uppercase; }
+          .footer { background: #f8fafc; padding: 18px; text-align: center; font-size: 12px; color: #94a3b8; border-top: 1px solid #eaeff7; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>JobBox Admin System Alert</h1>
+            <p>${actionLabel}</p>
+          </div>
+          <div class="content">
+            <div style="font-size: 16px; font-weight: 700; color: #05264E; margin-bottom: 12px;">
+              Admin Notification: User ${actionType === "SIGNUP" ? "Signed Up" : "Logged In"}
+            </div>
+            <p style="font-size: 14px; color: #66789c; line-height: 1.6;">
+              A user account event was detected on JobBox Portal. Below are the activity details:
+            </p>
+
+            <div class="card">
+              <div class="info-row"><span>Event Type:</span> <strong>${actionType}</strong></div>
+              <div class="info-row"><span>User Email:</span> <strong>${userEmail}</strong></div>
+              ${userFullName ? `<div class="info-row"><span>Full Name:</span> <strong>${userFullName}</strong></div>` : ""}
+              <div class="info-row"><span>Account Role:</span> <span class="role-pill">${role}</span></div>
+              <div class="info-row"><span>Timestamp:</span> <strong>${formattedTime}</strong></div>
+            </div>
+          </div>
+          <div class="footer">
+            © ${new Date().getFullYear()} JobBox Platform Security & Administration.
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    return this.sendMail({ to: adminEmail, subject, html });
+  }
 }

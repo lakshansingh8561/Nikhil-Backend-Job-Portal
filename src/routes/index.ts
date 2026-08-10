@@ -11,6 +11,7 @@ import { chatRoutes } from "../features/chat";
 import { locationRoutes } from "../features/location";
 import { membershipRoutes } from "../features/memberships";
 import { paymentRoutes } from "../features/payments";
+import { uploadRoutes } from "../features/upload/upload.routes";
 
 const router = Router();
 
@@ -26,5 +27,6 @@ router.use("/chat", chatRoutes);
 router.use("/location", locationRoutes);
 router.use("/memberships", membershipRoutes);
 router.use("/payments", paymentRoutes);
+router.use("/upload", uploadRoutes);
 
 export default router;

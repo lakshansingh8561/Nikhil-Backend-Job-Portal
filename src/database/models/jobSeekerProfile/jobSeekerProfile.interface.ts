@@ -22,6 +22,8 @@ export interface IExperience {
 export interface IJobSeekerProfile extends Document {
   userId: Types.ObjectId;
   resumeUrl?: string;
+  resume?: string;
+  profilePicture?: string;
   yearsOfExperience: number;
   expectedSalary?: number;
   noticePeriodDays?: number;
