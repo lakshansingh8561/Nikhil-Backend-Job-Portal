@@ -1,4 +1,5 @@
 import { Server } from "socket.io";
+import { Types } from "mongoose";
 import { AuthenticatedSocket } from "./socket.auth.middleware";
 import { ChatService } from "../features/chat/chat.service";
 import { Conversation, Message } from "../database/models";
@@ -38,7 +39,10 @@ export const setupSocketHandlers = (io: Server) => {
 
         const conversation = await Conversation.findOne({
           _id: data.conversationId,
-          "members.userId": userId,
+          $or: [
+            { participants: new Types.ObjectId(userId) },
+            { "members.userId": new Types.ObjectId(userId) },
+          ],
         });
 
         if (!conversation) {
@@ -51,10 +55,15 @@ export const setupSocketHandlers = (io: Server) => {
         socket.join(`conversation_${data.conversationId}`);
 
         // Check if other member is online
-        const otherMember = conversation.members.find(
-          (m: any) => m.userId.toString() !== userId
-        );
-        const otherParticipantId = otherMember?.userId?.toString();
+        let otherParticipantId = "";
+        if (conversation.participants && conversation.participants.length > 0) {
+          const otherP = conversation.participants.find((p: any) => p.toString() !== userId);
+          if (otherP) otherParticipantId = otherP.toString();
+        }
+        if (!otherParticipantId && conversation.members && conversation.members.length > 0) {
+          const otherM = conversation.members.find((m: any) => m.userId.toString() !== userId);
+          if (otherM) otherParticipantId = otherM.userId.toString();
+        }
 
         const isOtherOnline = otherParticipantId
           ? onlineUsers.has(otherParticipantId) &&
@@ -109,6 +118,20 @@ export const setupSocketHandlers = (io: Server) => {
 
         io.to(room1).to(room2).emit("receive-message", message);
         io.to(room1).to(room2).emit("receive_message", message);
+
+        // Broadcast directly to user rooms for real-time list & badge updates
+        const convObj = await Conversation.findById(data.conversationId).lean();
+        if (convObj) {
+          const participantIds = new Set<string>();
+          if (convObj.participants) convObj.participants.forEach((p: any) => participantIds.add(p.toString()));
+          if (convObj.members) convObj.members.forEach((m: any) => participantIds.add(m.userId.toString()));
+
+          participantIds.forEach((pId) => {
+            io.to(`user:${pId}`).emit("receive_message", message);
+            io.to(`user:${pId}`).emit("receive-message", message);
+            io.to(`user:${pId}`).emit("conversation_updated", { conversationId: data.conversationId });
+          });
+        }
       } catch (err: any) {
         socket.emit("error", {
           message: err.message || "Failed to send message",
@@ -222,6 +245,69 @@ export const setupSocketHandlers = (io: Server) => {
         onlineUsers.has(targetUserId) &&
         onlineUsers.get(targetUserId)!.size > 0;
       socket.emit("online_status_response", { userId: targetUserId, isOnline });
+    });
+
+    // ==========================================
+    // Real-Time WebRTC Audio / Video Call Handlers
+    // ==========================================
+    socket.on("call_user", (data: {
+      conversationId: string;
+      targetUserId: string;
+      callType: "audio" | "video";
+      callerName: string;
+      callerAvatar?: string;
+      sdpOffer: any;
+    }) => {
+      io.to(`user:${data.targetUserId}`).emit("incoming_call", {
+        conversationId: data.conversationId,
+        fromUserId: userId,
+        callType: data.callType,
+        callerName: data.callerName,
+        callerAvatar: data.callerAvatar,
+        sdpOffer: data.sdpOffer,
+      });
+    });
+
+    socket.on("accept_call", (data: {
+      conversationId: string;
+      callerUserId: string;
+      sdpAnswer: any;
+    }) => {
+      io.to(`user:${data.callerUserId}`).emit("call_accepted", {
+        conversationId: data.conversationId,
+        recipientUserId: userId,
+        sdpAnswer: data.sdpAnswer,
+      });
+    });
+
+    socket.on("decline_call", (data: {
+      conversationId: string;
+      callerUserId: string;
+      reason?: string;
+    }) => {
+      io.to(`user:${data.callerUserId}`).emit("call_declined", {
+        conversationId: data.conversationId,
+        reason: data.reason || "Call declined",
+      });
+    });
+
+    socket.on("end_call", (data: {
+      conversationId: string;
+      targetUserId: string;
+    }) => {
+      io.to(`user:${data.targetUserId}`).emit("call_ended", {
+        conversationId: data.conversationId,
+      });
+    });
+
+    socket.on("ice_candidate", (data: {
+      targetUserId: string;
+      candidate: any;
+    }) => {
+      io.to(`user:${data.targetUserId}`).emit("ice_candidate", {
+        fromUserId: userId,
+        candidate: data.candidate,
+      });
     });
 
     // Handle Disconnect

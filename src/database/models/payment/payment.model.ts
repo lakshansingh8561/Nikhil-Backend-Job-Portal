@@ -44,39 +44,37 @@ const paymentSchema = new Schema<IPayment>(
     },
     razorpayOrderId: {
       type: String,
-      default: "",
+      default: null,
       trim: true,
-      index: true,
     },
     razorpayPaymentId: {
       type: String,
-      default: "",
+      default: null,
       trim: true,
-      index: true,
     },
     razorpaySignature: {
       type: String,
-      default: "",
+      default: null,
       trim: true,
     },
     providerPaymentId: {
       type: String,
-      default: "",
+      default: null,
       trim: true,
     },
     providerOrderId: {
       type: String,
-      default: "",
+      default: null,
       trim: true,
     },
     method: {
       type: String,
-      default: "",
+      default: null,
       trim: true,
     },
     failureReason: {
       type: String,
-      default: "",
+      default: null,
       trim: true,
     },
     metadata: {

@@ -1,4 +1,4 @@
-import { JobSeekerProfile, User } from "../../database/models";
+import { JobSeekerProfile, User, UserProfile } from "../../database/models";
 import { ApiError } from "../../common/utils/ApiError";
 import { HTTP_STATUS } from "../../common/constants/httpStatus";
 import { Role } from "../../common/enums";
@@ -72,7 +72,13 @@ export class JobSeekerService {
       );
     }
 
-    return profile;
+    const userProf = await UserProfile.findOne({ userId });
+    const profileObj = profile.toObject();
+    if (userProf?.profilePicture) {
+      profileObj.profilePicture = userProf.profilePicture;
+    }
+
+    return profileObj;
   }
 
   /**
@@ -172,7 +178,20 @@ export class JobSeekerService {
       );
     }
 
-    return profile;
+    if (sanitizedPayload.profilePicture) {
+      await UserProfile.findOneAndUpdate(
+        { userId },
+        { $set: { profilePicture: sanitizedPayload.profilePicture } },
+        { new: true, upsert: true }
+      );
+    }
+
+    const profileObj = profile.toObject();
+    if (sanitizedPayload.profilePicture) {
+      profileObj.profilePicture = sanitizedPayload.profilePicture;
+    }
+
+    return profileObj;
   }
 }
 

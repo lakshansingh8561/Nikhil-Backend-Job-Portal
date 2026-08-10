@@ -23,4 +23,8 @@ export const env = {
   JWT_REFRESH_EXPIRES_IN: process.env.JWT_REFRESH_EXPIRES_IN || "7d",
 
   CLIENT_URL: process.env.CLIENT_URL || process.env.CORS_ORIGIN || "http://localhost:5173",
+
+  CLOUDINARY_CLOUD_NAME: process.env.CLOUDINARY_CLOUD_NAME || "rmqcfadd",
+  CLOUDINARY_API_KEY: process.env.CLOUDINARY_API_KEY || "222221271939251",
+  CLOUDINARY_API_SECRET: process.env.CLOUDINARY_API_SECRET || "7NWpGJpOR1RKp3mvVI5QFZRKvo0",
 };

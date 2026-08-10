@@ -59,8 +59,8 @@ const applicationSchema = new Schema<IApplication>(
   }
 );
 
-applicationSchema.index({ jobId: 1, candidateId: 1 }, { unique: true });
-applicationSchema.index({ candidateId: 1, status: 1 });
+applicationSchema.index({ jobId: 1, userId: 1 }, { unique: true });
+applicationSchema.index({ userId: 1, status: 1 });
 applicationSchema.index({ jobId: 1, status: 1 });
 
 export const Application = model<IApplication>(

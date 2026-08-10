@@ -34,6 +34,16 @@ const jobSeekerProfileSchema = new Schema<IJobSeekerProfile>(
       default: "",
       trim: true,
     },
+    resume: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    profilePicture: {
+      type: String,
+      default: "",
+      trim: true,
+    },
     yearsOfExperience: {
       type: Number,
       default: 0,

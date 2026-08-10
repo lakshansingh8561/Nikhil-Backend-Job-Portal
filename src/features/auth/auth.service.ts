@@ -2,6 +2,7 @@ import { User, UserProfile, JobSeekerProfile, RecruiterProfile } from "../../dat
 import { ApiError } from "../../common/utils/ApiError";
 import { HTTP_STATUS } from "../../common/constants/httpStatus";
 import { AUTH_MESSAGES } from "./auth.constants";
+import { EmailService } from "../../common/services/email.service";
 import {
   AuthResponse,
   JwtPayload,
@@ -76,6 +77,13 @@ export class AuthService {
           designation: "Recruiter",
         }).catch(() => null);
       }
+
+      // Notify admin about new Google Auth user registration
+      EmailService.sendAdminUserActivityNotification({
+        userEmail: user.email,
+        role: user.role,
+        actionType: "SIGNUP",
+      }).catch((err) => console.error("[AuthService] Admin notification signup email error:", err));
     }
 
     if (user.status === UserStatus.BLOCKED) {
@@ -156,6 +164,13 @@ export class AuthService {
 
     const accessToken = generateAccessToken(jwtPayload);
     const refreshToken = generateRefreshToken(jwtPayload);
+
+    // Notify admin about new user registration
+    EmailService.sendAdminUserActivityNotification({
+      userEmail: user.email,
+      role: user.role,
+      actionType: "SIGNUP",
+    }).catch((err) => console.error("[AuthService] Admin notification signup email error:", err));
 
     return {
       accessToken,
