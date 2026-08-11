@@ -48,21 +48,6 @@ export class PaymentService {
       );
     }
 
-    // Check if user already has an active subscription for this plan
-    const activeSub = await Subscription.findOne({
-      userId: new Types.ObjectId(userId),
-      membershipId: plan._id,
-      status: "ACTIVE",
-      endDate: { $gt: new Date() },
-    });
-
-    if (activeSub) {
-      throw new ApiError(
-        HTTP_STATUS.BAD_REQUEST,
-        PAYMENT_MESSAGES.ALREADY_SUBSCRIBED
-      );
-    }
-
     // If Free Plan, directly activate without Razorpay order
     if (plan.price === 0) {
       await MembershipRepository.expireActiveSubscriptions(userId);

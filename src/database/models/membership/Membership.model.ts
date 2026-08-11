@@ -61,6 +61,15 @@ const membershipSchema = new Schema<IMembership>(
       default: true,
       index: true,
     },
+    isDeleted: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    deletedAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,

@@ -23,6 +23,7 @@ export interface ICompanySocialLinks {
 export interface ICompany extends Document {
   name: string;
   userId?: Types.ObjectId;
+  ownerId?: Types.ObjectId;
   slug: string;
   description?: string;
   industry: string;

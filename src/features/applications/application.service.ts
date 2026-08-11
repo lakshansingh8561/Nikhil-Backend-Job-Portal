@@ -1,3 +1,4 @@
+import { Types } from "mongoose";
 import { Application, ApplicationStatusHistory, Job, User, UserProfile } from "../../database/models";
 import { ApiError } from "../../common/utils/ApiError";
 import { HTTP_STATUS } from "../../common/constants/httpStatus";
@@ -110,33 +111,49 @@ export class ApplicationService {
   }
 
   static async getRecruiterAllApplications(recruiterId: string) {
-    const recruiterJobs = await Job.find({ userId: recruiterId }).select("_id");
+    const recruiterJobs = await Job.find({
+      $or: [
+        { userId: new Types.ObjectId(recruiterId) },
+        { recruiterId: new Types.ObjectId(recruiterId) },
+      ],
+    }).select("_id");
+
     const jobIds = recruiterJobs.map((j) => j._id);
 
-    const applications = await Application.find({ jobId: { $in: jobIds } })
-      .populate("jobId", "title location companyId")
+    const applications = await Application.find({
+      $or: [
+        { jobId: { $in: jobIds } },
+        { recruiterId: new Types.ObjectId(recruiterId) },
+      ],
+    })
+      .populate("jobId", "title location companyId userId recruiterId")
       .populate("userId", "email role")
+      .populate("applicantId", "email role")
+      .populate("candidateId", "email role")
       .sort({ createdAt: -1 })
       .lean();
 
     const result = await Promise.all(
       applications.map(async (app) => {
+        const rawApp = app as any;
         const candidateUserId =
-          typeof app.userId === "object" && app.userId !== null
-            ? (app.userId as any)._id
-            : app.userId;
+          (typeof app.userId === "object" && app.userId !== null ? (app.userId as any)._id : app.userId) ||
+          (typeof rawApp.applicantId === "object" && rawApp.applicantId !== null ? rawApp.applicantId._id : rawApp.applicantId) ||
+          (typeof rawApp.candidateId === "object" && rawApp.candidateId !== null ? rawApp.candidateId._id : rawApp.candidateId);
 
         const profile = await UserProfile.findOne({
           userId: candidateUserId,
         }).lean();
 
-        const candidateUser =
-          typeof app.userId === "object" && app.userId !== null
-            ? (app.userId as any)
-            : null;
+        let candidateUser =
+          typeof app.userId === "object" && app.userId !== null ? (app.userId as any) : null;
+        if (!candidateUser && candidateUserId) {
+          candidateUser = await User.findById(candidateUserId).select("email role").lean();
+        }
 
         return {
           ...app,
+          userId: candidateUserId || app.userId,
           applicantProfile: profile
             ? {
                 firstName: profile.firstName,

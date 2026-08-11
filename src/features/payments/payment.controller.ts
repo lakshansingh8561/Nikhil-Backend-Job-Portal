@@ -57,4 +57,40 @@ export class PaymentController {
       new ApiResponse(true, PAYMENT_MESSAGES.FETCHED_SUCCESS, payments)
     );
   });
+
+  // ==========================================
+  // POLAR SANDBOX ENDPOINTS
+  // ==========================================
+  static createPolarCheckout = asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const userId = getUserIdFromReq(req);
+    const userRole = getUserRoleFromReq(req);
+
+    const { PolarService } = await import("./polar.service");
+    const result = await PolarService.createCheckoutSession(userId, userRole, req.body);
+
+    res.status(HTTP_STATUS.OK).json(
+      new ApiResponse(true, "Polar Sandbox Checkout Session created successfully.", result)
+    );
+  });
+
+  static handlePolarWebhook = asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const rawBody = (req as any).rawBody || JSON.stringify(req.body);
+
+    const { PolarService } = await import("./polar.service");
+    const result = await PolarService.handleWebhook(rawBody, req.headers);
+
+    res.status(HTTP_STATUS.OK).json(result);
+  });
+
+  static getPolarStatus = asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const userId = getUserIdFromReq(req);
+    const checkoutId = (req.params.checkoutId as string) || "";
+
+    const { PolarService } = await import("./polar.service");
+    const result = await PolarService.getCheckoutStatus(checkoutId, userId);
+
+    res.status(HTTP_STATUS.OK).json(
+      new ApiResponse(true, "Checkout status fetched successfully.", result)
+    );
+  });
 }

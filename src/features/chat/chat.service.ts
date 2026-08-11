@@ -86,7 +86,7 @@ export class ChatService {
     if (!recipientId && data.jobId) {
       const job = await Job.findById(data.jobId).lean();
       if (job) {
-        const recId = (job as any).userId;
+        const recId = (job as any).userId || (job as any).recruiterId;
         if (recId) {
           recipientId = recId.toString();
         }

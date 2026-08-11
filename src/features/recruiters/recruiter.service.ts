@@ -9,6 +9,11 @@ import {
   RecruiterQuery,
 } from "./recruiter.types";
 
+function escapeRegExp(str: string): string {
+  if (!str) return "";
+  return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 export class RecruiterService {
   static async createProfile(
     userId: string,
@@ -50,11 +55,27 @@ export class RecruiterService {
   }
 
   static async getProfile(userId: string) {
-    const profile = await RecruiterProfile.findOne({
+    let profile = await RecruiterProfile.findOne({
       userId,
     })
       .populate("userId", "email role")
       .populate("companyId");
+
+    if (!profile) {
+      // Auto-create basic profile if it doesn't exist yet for logged-in recruiter
+      const user = await User.findById(userId);
+      if (user && user.role === Role.RECRUITER) {
+        const newProfile = await RecruiterProfile.create({
+          userId,
+          firstName: user.email.split("@")[0],
+          lastName: "",
+          designation: "Recruiter",
+        });
+        profile = await RecruiterProfile.findById(newProfile._id)
+          .populate("userId", "email role")
+          .populate("companyId");
+      }
+    }
 
     if (!profile) {
       throw new ApiError(
@@ -69,36 +90,41 @@ export class RecruiterService {
   static async getAllRecruiters(query: RecruiterQuery) {
     const filter: any = {};
 
-    if (query.search) {
+    if (query.search && String(query.search).trim()) {
+      const s = escapeRegExp(String(query.search).trim());
       filter.$or = [
-        { firstName: { $regex: query.search, $options: "i" } },
-        { lastName: { $regex: query.search, $options: "i" } },
-        { currentCompany: { $regex: query.search, $options: "i" } },
-        { designation: { $regex: query.search, $options: "i" } },
-        { bio: { $regex: query.search, $options: "i" } },
-        { headline: { $regex: query.search, $options: "i" } },
+        { firstName: { $regex: s, $options: "i" } },
+        { lastName: { $regex: s, $options: "i" } },
+        { currentCompany: { $regex: s, $options: "i" } },
+        { designation: { $regex: s, $options: "i" } },
+        { bio: { $regex: s, $options: "i" } },
+        { headline: { $regex: s, $options: "i" } },
       ];
     }
 
-    if (query.letter) {
-      filter.currentCompany = { $regex: `^${query.letter}`, $options: "i" };
+    if (query.letter && String(query.letter).trim()) {
+      const l = escapeRegExp(String(query.letter).trim());
+      filter.currentCompany = { $regex: `^${l}`, $options: "i" };
     }
 
-    if (query.location) {
-      filter.currentLocation = { $regex: query.location, $options: "i" };
+    if (query.location && String(query.location).trim()) {
+      const loc = escapeRegExp(String(query.location).trim());
+      filter.currentLocation = { $regex: loc, $options: "i" };
     }
 
-    if (query.industry) {
+    if (query.industry && String(query.industry).trim()) {
+      const ind = escapeRegExp(String(query.industry).trim());
       filter.$or = filter.$or || [];
       filter.$or.push(
-        { designation: { $regex: query.industry, $options: "i" } },
-        { currentCompany: { $regex: query.industry, $options: "i" } },
-        { headline: { $regex: query.industry, $options: "i" } }
+        { designation: { $regex: ind, $options: "i" } },
+        { currentCompany: { $regex: ind, $options: "i" } },
+        { headline: { $regex: ind, $options: "i" } }
       );
     }
 
-    if (query.position) {
-      filter.designation = { $regex: query.position, $options: "i" };
+    if (query.position && String(query.position).trim()) {
+      const pos = escapeRegExp(String(query.position).trim());
+      filter.designation = { $regex: pos, $options: "i" };
     }
 
     if (query.experience) {
@@ -124,8 +150,8 @@ export class RecruiterService {
       }
     }
 
-    const page = Number(query.page) || 1;
-    const limit = Number(query.limit) || 10;
+    const page = Math.max(1, Number(query.page) || 1);
+    const limit = Math.min(100, Math.max(1, Number(query.limit) || 10));
     const skip = (page - 1) * limit;
 
     const recruiters = await RecruiterProfile.find(filter)
@@ -164,23 +190,10 @@ export class RecruiterService {
     };
   }
 
-  static async updateProfile(
-    userId: string,
-    payload: UpdateRecruiterProfileInput
-  ) {
-    const profile =
-      await RecruiterProfile.findOneAndUpdate(
-        { userId },
-        {
-          $set: payload,
-        },
-        {
-          new: true,
-          runValidators: true,
-        }
-      )
-        .populate("userId", "email role")
-        .populate("companyId");
+  static async getRecruiterById(id: string) {
+    const profile = await RecruiterProfile.findById(id)
+      .populate("userId", "email role")
+      .populate("companyId");
 
     if (!profile) {
       throw new ApiError(
@@ -188,6 +201,36 @@ export class RecruiterService {
         RECRUITER_MESSAGES.PROFILE_NOT_FOUND
       );
     }
+
+    const openJobs = await Job.find({
+      userId: profile.userId,
+      isActive: true,
+    }).sort({ createdAt: -1 });
+
+    return {
+      profile,
+      openJobs,
+    };
+  }
+
+  static async updateProfile(
+    userId: string,
+    payload: UpdateRecruiterProfileInput
+  ) {
+    let profile = await RecruiterProfile.findOne({
+      userId,
+    });
+
+    if (!profile) {
+      profile = await RecruiterProfile.create({
+        userId,
+        ...payload,
+      });
+      return profile;
+    }
+
+    Object.assign(profile, payload);
+    await profile.save();
 
     return profile;
   }

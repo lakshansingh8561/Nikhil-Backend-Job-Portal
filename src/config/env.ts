@@ -24,7 +24,13 @@ export const env = {
 
   CLIENT_URL: process.env.CLIENT_URL || process.env.CORS_ORIGIN || "http://localhost:5173",
 
-  CLOUDINARY_CLOUD_NAME: process.env.CLOUDINARY_CLOUD_NAME || "rmqcfadd",
-  CLOUDINARY_API_KEY: process.env.CLOUDINARY_API_KEY || "222221271939251",
-  CLOUDINARY_API_SECRET: process.env.CLOUDINARY_API_SECRET || "7NWpGJpOR1RKp3mvVI5QFZRKvo0",
+  CLOUDINARY_CLOUD_NAME: process.env.CLOUDINARY_CLOUD_NAME ,
+  CLOUDINARY_API_KEY: process.env.CLOUDINARY_API_KEY ,
+  CLOUDINARY_API_SECRET: process.env.CLOUDINARY_API_SECRET ,
+
+  POLAR_ACCESS_TOKEN: process.env.POLAR_ACCESS_TOKEN ,
+  POLAR_PRODUCT_ID: process.env.POLAR_PRODUCT_ID ,
+  POLAR_SERVER: (process.env.POLAR_SERVER as "sandbox" | "production") || "sandbox",
+  POLAR_WEBHOOK_SECRET: process.env.POLAR_WEBHOOK_SECRET || "",
+  FRONTEND_URL: process.env.FRONTEND_URL || process.env.CLIENT_URL || "http://localhost:5173",
 };

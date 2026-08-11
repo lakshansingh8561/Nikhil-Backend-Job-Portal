@@ -20,6 +20,8 @@ export interface IPayment extends Document {
   failureReason?: string;
   metadata?: Record<string, any>;
   paidAt?: Date;
+  isDeleted: boolean;
+  deletedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }

@@ -19,6 +19,8 @@ export interface ISubscription extends Document {
   paymentStatus: SubscriptionPaymentStatus;
   autoRenew: boolean;
   cancelledAt?: Date | null;
+  isDeleted: boolean;
+  deletedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }

@@ -53,4 +53,14 @@ export class NotificationService {
     );
     return { success: true };
   }
+
+  static async clearAllNotifications(userId: string) {
+    await Notification.deleteMany({ recipientId: userId });
+    return { success: true };
+  }
+
+  static async deleteNotification(notificationId: string, userId: string) {
+    await Notification.deleteOne({ _id: notificationId, recipientId: userId });
+    return { success: true };
+  }
 }

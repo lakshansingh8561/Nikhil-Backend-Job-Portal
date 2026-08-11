@@ -7,6 +7,8 @@ export interface ICompanyMember extends Document {
   userId: Types.ObjectId;
   role: CompanyMemberRole;
   joinedAt: Date;
+  isDeleted: boolean;
+  deletedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }

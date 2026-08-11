@@ -9,6 +9,11 @@ import {
   JobSeekerQuery,
 } from "./jobSeeker.types";
 
+function escapeRegExp(str: string): string {
+  if (!str) return "";
+  return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 export class JobSeekerService {
   /**
    * Create Profile
@@ -55,15 +60,30 @@ export class JobSeekerService {
   }
 
   /**
-   * Get My Profile
+   * Get My Profile (with auto-create fallback)
    */
   static async getProfile(userId: string) {
-    const profile = await JobSeekerProfile.findOne({
+    let profile = await JobSeekerProfile.findOne({
       userId,
     }).populate(
       "userId",
       "email role createdAt"
     );
+
+    if (!profile) {
+      const user = await User.findById(userId);
+      if (user && user.role === Role.JOB_SEEKER) {
+        await JobSeekerProfile.create({
+          userId,
+          firstName: user.email.split("@")[0],
+          lastName: "",
+        });
+        profile = await JobSeekerProfile.findOne({ userId }).populate(
+          "userId",
+          "email role createdAt"
+        );
+      }
+    }
 
     if (!profile) {
       throw new ApiError(
@@ -82,29 +102,32 @@ export class JobSeekerService {
   }
 
   /**
-   * Get All Candidate Profiles with Pagination
+   * Get All Candidate Profiles with Pagination & Safe Regex Filtering
    */
   static async getAllProfiles(query: JobSeekerQuery) {
     const filter: any = {};
 
-    if (query.search) {
+    if (query.search && String(query.search).trim()) {
+      const s = escapeRegExp(String(query.search).trim());
       filter.$or = [
-        { firstName: { $regex: query.search, $options: "i" } },
-        { lastName: { $regex: query.search, $options: "i" } },
-        { headline: { $regex: query.search, $options: "i" } },
+        { firstName: { $regex: s, $options: "i" } },
+        { lastName: { $regex: s, $options: "i" } },
+        { headline: { $regex: s, $options: "i" } },
       ];
     }
 
-    if (query.location) {
-      filter.currentLocation = { $regex: query.location, $options: "i" };
+    if (query.location && String(query.location).trim()) {
+      const loc = escapeRegExp(String(query.location).trim());
+      filter.currentLocation = { $regex: loc, $options: "i" };
     }
 
-    if (query.skill) {
-      filter.skills = { $in: [new RegExp(query.skill, "i")] };
+    if (query.skill && String(query.skill).trim()) {
+      const sk = escapeRegExp(String(query.skill).trim());
+      filter.skills = { $in: [new RegExp(sk, "i")] };
     }
 
-    const page = Number(query.page) || 1;
-    const limit = Number(query.limit) || 10;
+    const page = Math.max(1, Number(query.page) || 1);
+    const limit = Math.min(100, Math.max(1, Number(query.limit) || 10));
     const skip = (page - 1) * limit;
 
     const profiles = await JobSeekerProfile.find(filter)
@@ -121,7 +144,7 @@ export class JobSeekerService {
         page,
         limit,
         total,
-        pages: Math.ceil(total / limit),
+        pages: Math.ceil(total / limit) || 1,
       },
     };
   }
@@ -154,7 +177,7 @@ export class JobSeekerService {
   ) {
     const sanitizedPayload = sanitizeProfilePayload(payload);
 
-    const profile =
+    let profile =
       await JobSeekerProfile.findOneAndUpdate(
         {
           userId,
@@ -170,6 +193,18 @@ export class JobSeekerService {
         "userId",
         "email role createdAt"
       );
+
+    if (!profile) {
+      // Auto-create on update if not present
+      profile = await JobSeekerProfile.create({
+        userId,
+        ...sanitizedPayload,
+      }) as any;
+      profile = await JobSeekerProfile.findById((profile as any)._id).populate(
+        "userId",
+        "email role createdAt"
+      );
+    }
 
     if (!profile) {
       throw new ApiError(
