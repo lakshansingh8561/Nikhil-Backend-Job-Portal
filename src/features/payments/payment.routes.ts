@@ -2,12 +2,13 @@ import { Router } from "express";
 import { PaymentController } from "./payment.controller";
 import { authenticate } from "../../common/middlewares/auth.middleware";
 import { validate } from "../../common/middlewares/validate.middleware";
-import { createOrderSchema, verifyPaymentSchema } from "./payment.validation";
+import { createOrderSchema, verifyPaymentSchema, createPolarCheckoutSchema } from "./payment.validation";
 
 const router = Router();
 
-// Public Webhook route (No JWT auth, signature verified via HMAC SHA-256)
+// Public Webhook routes (No JWT auth, signature verified by webhook handler)
 router.post("/webhook", PaymentController.handleWebhook);
+router.post("/polar/webhook", PaymentController.handlePolarWebhook);
 
 // Protected routes
 router.use(authenticate);
@@ -25,5 +26,14 @@ router.post(
 );
 
 router.get("/my", PaymentController.getUserPayments);
+
+// Polar Sandbox Protected routes
+router.post(
+  "/polar/create-checkout",
+  validate(createPolarCheckoutSchema),
+  PaymentController.createPolarCheckout
+);
+
+router.get("/polar/status/:checkoutId", PaymentController.getPolarStatus);
 
 export default router;

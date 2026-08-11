@@ -8,6 +8,8 @@ export interface INotification extends Document {
   message: string;
   link?: string;
   isRead: boolean;
+  isDeleted: boolean;
+  deletedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }

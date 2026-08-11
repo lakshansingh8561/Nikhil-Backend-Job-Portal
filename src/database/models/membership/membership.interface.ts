@@ -18,6 +18,8 @@ export interface IMembership extends Document {
   isPopular: boolean;
   isRecommended: boolean;
   isActive: boolean;
+  isDeleted: boolean;
+  deletedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }

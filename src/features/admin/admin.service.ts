@@ -15,6 +15,11 @@ import { Role } from "../../common/enums";
 import { UserStatus } from "../../common/enums/userStatus.enum";
 import { ADMIN_MESSAGES } from "./admin.constants";
 
+function escapeRegExp(str: string): string {
+  if (!str) return "";
+  return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 export interface PaginationParams {
   page?: number;
   limit?: number;
@@ -98,8 +103,8 @@ export class AdminService {
       filter.status = params.status;
     }
 
-    if (params.search) {
-      const searchRegex = new RegExp(params.search, "i");
+    if (params.search && String(params.search).trim()) {
+      const searchRegex = new RegExp(escapeRegExp(String(params.search).trim()), "i");
       filter.$or = [
         { email: searchRegex },
       ];
@@ -232,8 +237,8 @@ export class AdminService {
       filter.employmentType = params.employmentType;
     }
 
-    if (params.search) {
-      const searchRegex = new RegExp(params.search, "i");
+    if (params.search && String(params.search).trim()) {
+      const searchRegex = new RegExp(escapeRegExp(String(params.search).trim()), "i");
       filter.$or = [{ title: searchRegex }, { location: searchRegex }];
     }
 

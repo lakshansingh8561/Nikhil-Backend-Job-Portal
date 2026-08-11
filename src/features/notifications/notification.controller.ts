@@ -20,4 +20,15 @@ export class NotificationController {
     const data = await NotificationService.markAllAsRead(req.user.userId);
     res.status(HTTP_STATUS.OK).json(new ApiResponse(true, "All notifications marked as read.", data));
   });
+
+  static clearAll = asyncHandler(async (req: Request, res: Response) => {
+    const data = await NotificationService.clearAllNotifications(req.user.userId);
+    res.status(HTTP_STATUS.OK).json(new ApiResponse(true, "All notifications cleared.", data));
+  });
+
+  static deleteNotification = asyncHandler(async (req: Request, res: Response) => {
+    const id = req.params.id as string;
+    const data = await NotificationService.deleteNotification(id, req.user.userId);
+    res.status(HTTP_STATUS.OK).json(new ApiResponse(true, "Notification deleted.", data));
+  });
 }

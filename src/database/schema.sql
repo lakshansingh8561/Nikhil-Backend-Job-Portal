@@ -75,19 +75,25 @@ EXCEPTION
 END $$;
 
 DO $$ BEGIN
+    CREATE TYPE message_status AS ENUM ('sent', 'delivered', 'read');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
     CREATE TYPE notification_type AS ENUM ('JOB_ALERT', 'APPLICATION_UPDATE', 'NEW_MESSAGE', 'SYSTEM_ALERT');
 EXCEPTION
     WHEN duplicate_object THEN null;
 END $$;
 
 DO $$ BEGIN
-    CREATE TYPE subscription_status AS ENUM ('ACTIVE', 'EXPIRED', 'CANCELLED', 'PENDING');
+    CREATE TYPE subscription_status AS ENUM ('ACTIVE', 'EXPIRED', 'CANCELLED', 'PENDING', 'PAST_DUE');
 EXCEPTION
     WHEN duplicate_object THEN null;
 END $$;
 
 DO $$ BEGIN
-    CREATE TYPE payment_status AS ENUM ('PENDING', 'SUCCESS', 'FAILED', 'REFUNDED');
+    CREATE TYPE payment_status AS ENUM ('PENDING', 'AUTHORIZED', 'CAPTURED', 'SUCCESS', 'FAILED', 'PAID', 'PAST_DUE', 'REFUNDED');
 EXCEPTION
     WHEN duplicate_object THEN null;
 END $$;
@@ -122,6 +128,7 @@ CREATE TABLE IF NOT EXISTS users (
     status user_status NOT NULL DEFAULT 'ACTIVE',
     is_verified BOOLEAN NOT NULL DEFAULT FALSE,
     last_login TIMESTAMPTZ,
+    refresh_token TEXT DEFAULT NULL,
     is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
     deleted_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -132,7 +139,7 @@ CREATE TABLE IF NOT EXISTS users (
     )
 );
 
--- 2. User Profiles
+-- 2. User Profiles Table
 CREATE TABLE IF NOT EXISTS user_profiles (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
@@ -162,7 +169,10 @@ CREATE TABLE IF NOT EXISTS companies (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name VARCHAR(255) NOT NULL,
     slug VARCHAR(255) NOT NULL,
+    tagline TEXT DEFAULT '',
     description TEXT DEFAULT '',
+    mission TEXT DEFAULT '',
+    vision TEXT DEFAULT '',
     industry VARCHAR(100) DEFAULT '',
     company_size VARCHAR(50) DEFAULT '1-10',
     email VARCHAR(255) DEFAULT '',
@@ -170,6 +180,9 @@ CREATE TABLE IF NOT EXISTS companies (
     website VARCHAR(255) DEFAULT '',
     logo_url TEXT DEFAULT '',
     cover_image_url TEXT DEFAULT '',
+    founded_year INTEGER,
+    headquarters TEXT DEFAULT '',
+    office_images TEXT[] DEFAULT '{}',
     location JSONB DEFAULT '{}'::jsonb,
     social_links JSONB DEFAULT '{}'::jsonb,
     verification_status verification_status NOT NULL DEFAULT 'PENDING',
@@ -184,26 +197,36 @@ CREATE TABLE IF NOT EXISTS companies (
     )
 );
 
--- 4. Company Members
+-- 4. Company Members Table
 CREATE TABLE IF NOT EXISTS company_members (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE ON UPDATE CASCADE,
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
     role company_member_role NOT NULL DEFAULT 'RECRUITER',
     joined_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+    deleted_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(company_id, user_id)
+    UNIQUE(company_id, user_id),
+    CONSTRAINT chk_company_members_soft_delete CHECK (
+        (is_deleted = TRUE AND deleted_at IS NOT NULL) OR 
+        (is_deleted = FALSE AND deleted_at IS NULL)
+    )
 );
 
--- 5. Job Seeker Profiles
+-- 5. Job Seeker Profiles Table
 CREATE TABLE IF NOT EXISTS job_seeker_profiles (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
     resume_url TEXT DEFAULT '',
+    headline TEXT DEFAULT '',
+    bio TEXT DEFAULT '',
+    profile_picture TEXT DEFAULT '',
     years_of_experience NUMERIC(4, 1) DEFAULT 0 CHECK (years_of_experience >= 0),
     expected_salary NUMERIC(12, 2) DEFAULT 0 CHECK (expected_salary >= 0),
     notice_period_days INT DEFAULT 0 CHECK (notice_period_days >= 0),
+    skills TEXT[] DEFAULT '{}',
     education JSONB DEFAULT '[]'::jsonb,
     experience JSONB DEFAULT '[]'::jsonb,
     is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
@@ -216,13 +239,22 @@ CREATE TABLE IF NOT EXISTS job_seeker_profiles (
     )
 );
 
--- 6. Recruiter Profiles (DB-Enforced Composite Membership FK)
+-- 6. Recruiter Profiles Table (DB-Enforced Composite Membership FK)
 CREATE TABLE IF NOT EXISTS recruiter_profiles (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
+    first_name VARCHAR(100) DEFAULT '',
+    last_name VARCHAR(100) DEFAULT '',
+    phone VARCHAR(30) DEFAULT '',
     designation VARCHAR(150) DEFAULT 'Recruiter',
     department VARCHAR(100) DEFAULT '',
     current_company VARCHAR(255) DEFAULT '',
+    headline TEXT DEFAULT '',
+    bio TEXT DEFAULT '',
+    linkedin TEXT DEFAULT '',
+    github TEXT DEFAULT '',
+    portfolio TEXT DEFAULT '',
+    profile_picture TEXT DEFAULT '',
     experience NUMERIC(4, 1) DEFAULT 0 CHECK (experience >= 0),
     company_id UUID REFERENCES companies(id) ON DELETE SET NULL ON UPDATE CASCADE,
     is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
@@ -248,12 +280,14 @@ CREATE TABLE IF NOT EXISTS jobs (
     workplace_type workplace_type NOT NULL DEFAULT 'ONSITE',
     job_type job_type NOT NULL DEFAULT 'FULL_TIME',
     status job_status NOT NULL DEFAULT 'ACTIVE',
+    is_active BOOLEAN DEFAULT TRUE,
     location JSONB DEFAULT '{}'::jsonb,
     salary_min NUMERIC(12, 2) DEFAULT 0 CHECK (salary_min >= 0),
     salary_max NUMERIC(12, 2) DEFAULT 0 CHECK (salary_max >= 0),
     currency VARCHAR(10) DEFAULT 'USD' CHECK (currency IN ('INR', 'USD', 'EUR', 'GBP')),
     skills TEXT[] DEFAULT '{}',
     experience_level VARCHAR(50) DEFAULT 'Mid-Level',
+    vacancies INT DEFAULT 1 CHECK (vacancies >= 1),
     deadline TIMESTAMPTZ,
     is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
     deleted_at TIMESTAMPTZ,
@@ -295,10 +329,57 @@ CREATE TABLE IF NOT EXISTS application_status_history (
     new_status application_status NOT NULL,
     changed_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL ON UPDATE CASCADE,
     notes TEXT DEFAULT '',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+    deleted_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT chk_app_status_history_soft_delete CHECK (
+        (is_deleted = TRUE AND deleted_at IS NOT NULL) OR 
+        (is_deleted = FALSE AND deleted_at IS NULL)
+    )
 );
 
--- 10. Conversations Table
+-- 10. Education Table (Relational option alongside JSONB)
+CREATE TABLE IF NOT EXISTS education (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    job_seeker_profile_id UUID NOT NULL REFERENCES job_seeker_profiles(id) ON DELETE CASCADE ON UPDATE CASCADE,
+    institution TEXT,
+    degree TEXT,
+    field_of_study TEXT,
+    start_date DATE,
+    end_date DATE,
+    currently_studying BOOLEAN DEFAULT FALSE,
+    is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+    deleted_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT chk_education_soft_delete CHECK (
+        (is_deleted = TRUE AND deleted_at IS NOT NULL) OR 
+        (is_deleted = FALSE AND deleted_at IS NULL)
+    )
+);
+
+-- 11. Experience Table (Relational option alongside JSONB)
+CREATE TABLE IF NOT EXISTS experience (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    job_seeker_profile_id UUID NOT NULL REFERENCES job_seeker_profiles(id) ON DELETE CASCADE ON UPDATE CASCADE,
+    company TEXT,
+    designation TEXT,
+    employment_type TEXT DEFAULT 'FULL_TIME',
+    start_date DATE,
+    end_date DATE,
+    currently_working BOOLEAN DEFAULT FALSE,
+    description TEXT DEFAULT '',
+    is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+    deleted_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT chk_experience_soft_delete CHECK (
+        (is_deleted = TRUE AND deleted_at IS NOT NULL) OR 
+        (is_deleted = FALSE AND deleted_at IS NULL)
+    )
+);
+
+-- 12. Conversations Table
 CREATE TABLE IF NOT EXISTS conversations (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     type conversation_type NOT NULL DEFAULT 'DIRECT',
@@ -307,6 +388,8 @@ CREATE TABLE IF NOT EXISTS conversations (
     job_id UUID REFERENCES jobs(id) ON DELETE SET NULL ON UPDATE CASCADE,
     last_message_id UUID,
     last_message_at TIMESTAMPTZ,
+    job_seeker_unread INT DEFAULT 0 CHECK (job_seeker_unread >= 0),
+    recruiter_unread INT DEFAULT 0 CHECK (recruiter_unread >= 0),
     is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
     deleted_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -317,7 +400,7 @@ CREATE TABLE IF NOT EXISTS conversations (
     )
 );
 
--- 11. Conversation Participants Table
+-- 13. Conversation Participants Table
 CREATE TABLE IF NOT EXISTS conversation_participants (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE ON UPDATE CASCADE,
@@ -325,17 +408,31 @@ CREATE TABLE IF NOT EXISTS conversation_participants (
     joined_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     last_read_at TIMESTAMPTZ,
     is_muted BOOLEAN NOT NULL DEFAULT FALSE,
-    UNIQUE(conversation_id, user_id)
+    is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+    deleted_at TIMESTAMPTZ,
+    UNIQUE(conversation_id, user_id),
+    CONSTRAINT chk_conversation_participants_soft_delete CHECK (
+        (is_deleted = TRUE AND deleted_at IS NOT NULL) OR 
+        (is_deleted = FALSE AND deleted_at IS NULL)
+    )
 );
 
--- 12. Messages Table
+-- 14. Messages Table
 CREATE TABLE IF NOT EXISTS messages (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE ON UPDATE CASCADE,
     sender_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
+    receiver_id UUID REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
     message TEXT NOT NULL,
     message_type message_type NOT NULL DEFAULT 'text',
     attachments JSONB DEFAULT '[]'::jsonb,
+    status message_status NOT NULL DEFAULT 'sent',
+    sent_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    read BOOLEAN NOT NULL DEFAULT FALSE,
+    read_at TIMESTAMPTZ,
+    seen_at TIMESTAMPTZ,
+    delivered BOOLEAN NOT NULL DEFAULT FALSE,
+    delivered_at TIMESTAMPTZ,
     reply_to_id UUID REFERENCES messages(id) ON DELETE SET NULL ON UPDATE CASCADE,
     is_edited BOOLEAN NOT NULL DEFAULT FALSE,
     is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
@@ -348,15 +445,21 @@ CREATE TABLE IF NOT EXISTS messages (
     )
 );
 
--- 13. Message Reads Table
+-- 15. Message Reads Table
 CREATE TABLE IF NOT EXISTS message_reads (
     message_id UUID NOT NULL REFERENCES messages(id) ON DELETE CASCADE ON UPDATE CASCADE,
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
     read_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (message_id, user_id)
+    is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+    deleted_at TIMESTAMPTZ,
+    PRIMARY KEY (message_id, user_id),
+    CONSTRAINT chk_message_reads_soft_delete CHECK (
+        (is_deleted = TRUE AND deleted_at IS NOT NULL) OR 
+        (is_deleted = FALSE AND deleted_at IS NULL)
+    )
 );
 
--- 14. Notifications Table (recipient_id = receiver, sender_id = sender)
+-- 16. Notifications Table (recipient_id = receiver, sender_id = sender)
 CREATE TABLE IF NOT EXISTS notifications (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     recipient_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
@@ -367,10 +470,17 @@ CREATE TABLE IF NOT EXISTS notifications (
     link TEXT DEFAULT '',
     is_read BOOLEAN NOT NULL DEFAULT FALSE,
     metadata JSONB DEFAULT '{}'::jsonb,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+    deleted_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT chk_notifications_soft_delete CHECK (
+        (is_deleted = TRUE AND deleted_at IS NOT NULL) OR 
+        (is_deleted = FALSE AND deleted_at IS NULL)
+    )
 );
 
--- 15. Memberships Table
+-- 17. Memberships Table
 CREATE TABLE IF NOT EXISTS memberships (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name VARCHAR(100) NOT NULL,
@@ -383,45 +493,73 @@ CREATE TABLE IF NOT EXISTS memberships (
     is_popular BOOLEAN NOT NULL DEFAULT FALSE,
     is_recommended BOOLEAN NOT NULL DEFAULT FALSE,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+    deleted_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(name, role)
+    UNIQUE(name, role),
+    CONSTRAINT chk_memberships_soft_delete CHECK (
+        (is_deleted = TRUE AND deleted_at IS NOT NULL) OR 
+        (is_deleted = FALSE AND deleted_at IS NULL)
+    )
 );
 
--- 16. Subscriptions Table (Status Defaults to PENDING)
+-- 18. Subscriptions Table (Status Defaults to PENDING)
 CREATE TABLE IF NOT EXISTS subscriptions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
     membership_id UUID NOT NULL REFERENCES memberships(id) ON DELETE CASCADE ON UPDATE CASCADE,
+    role user_role NOT NULL DEFAULT 'JOB_SEEKER',
     plan_name VARCHAR(100) NOT NULL,
     amount NUMERIC(10, 2) NOT NULL DEFAULT 0 CHECK (amount >= 0),
     currency VARCHAR(10) DEFAULT 'INR' CHECK (currency IN ('INR', 'USD', 'EUR', 'GBP')),
     start_date TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     end_date TIMESTAMPTZ NOT NULL,
+    current_period_start TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    current_period_end TIMESTAMPTZ,
+    razorpay_subscription_id VARCHAR(255) DEFAULT '',
     status subscription_status NOT NULL DEFAULT 'PENDING',
     payment_status payment_status NOT NULL DEFAULT 'PENDING',
     auto_renew BOOLEAN NOT NULL DEFAULT TRUE,
     cancelled_at TIMESTAMPTZ,
+    is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+    deleted_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT chk_subscriptions_dates CHECK (end_date > start_date)
+    CONSTRAINT chk_subscriptions_dates CHECK (end_date > start_date),
+    CONSTRAINT chk_subscriptions_soft_delete CHECK (
+        (is_deleted = TRUE AND deleted_at IS NOT NULL) OR 
+        (is_deleted = FALSE AND deleted_at IS NULL)
+    )
 );
 
--- 17. Payments Table
+-- 19. Payments Table
 CREATE TABLE IF NOT EXISTS payments (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
+    membership_id UUID REFERENCES memberships(id) ON DELETE SET NULL ON UPDATE CASCADE,
     subscription_id UUID REFERENCES subscriptions(id) ON DELETE SET NULL ON UPDATE CASCADE,
     amount NUMERIC(12, 2) NOT NULL CHECK (amount >= 0),
     currency VARCHAR(10) NOT NULL DEFAULT 'INR' CHECK (currency IN ('INR', 'USD', 'EUR', 'GBP')),
     status payment_status NOT NULL DEFAULT 'PENDING',
     provider payment_provider NOT NULL DEFAULT 'RAZORPAY',
+    razorpay_order_id VARCHAR(255),
+    razorpay_payment_id VARCHAR(255),
+    razorpay_signature VARCHAR(255),
     provider_payment_id VARCHAR(255),
     provider_order_id VARCHAR(255),
+    method VARCHAR(100),
     failure_reason TEXT,
+    metadata JSONB DEFAULT '{}'::jsonb,
     paid_at TIMESTAMPTZ,
+    is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+    deleted_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT chk_payments_soft_delete CHECK (
+        (is_deleted = TRUE AND deleted_at IS NOT NULL) OR 
+        (is_deleted = FALSE AND deleted_at IS NULL)
+    )
 );
 
 -- Automatic Timestamps Triggers Assignment
@@ -433,8 +571,11 @@ CREATE OR REPLACE TRIGGER trg_job_seeker_profiles_updated_at BEFORE UPDATE ON jo
 CREATE OR REPLACE TRIGGER trg_recruiter_profiles_updated_at BEFORE UPDATE ON recruiter_profiles FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE OR REPLACE TRIGGER trg_jobs_updated_at BEFORE UPDATE ON jobs FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE OR REPLACE TRIGGER trg_applications_updated_at BEFORE UPDATE ON applications FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE OR REPLACE TRIGGER trg_education_updated_at BEFORE UPDATE ON education FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE OR REPLACE TRIGGER trg_experience_updated_at BEFORE UPDATE ON experience FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE OR REPLACE TRIGGER trg_conversations_updated_at BEFORE UPDATE ON conversations FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE OR REPLACE TRIGGER trg_messages_updated_at BEFORE UPDATE ON messages FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE OR REPLACE TRIGGER trg_notifications_updated_at BEFORE UPDATE ON notifications FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE OR REPLACE TRIGGER trg_memberships_updated_at BEFORE UPDATE ON memberships FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE OR REPLACE TRIGGER trg_subscriptions_updated_at BEFORE UPDATE ON subscriptions FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE OR REPLACE TRIGGER trg_payments_updated_at BEFORE UPDATE ON payments FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
@@ -459,16 +600,26 @@ CREATE INDEX IF NOT EXISTS idx_conversation_participants_conv ON conversation_pa
 CREATE INDEX IF NOT EXISTS idx_conversation_participants_user ON conversation_participants(user_id);
 CREATE INDEX IF NOT EXISTS idx_messages_conversation_created ON messages(conversation_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(sender_id);
+CREATE INDEX IF NOT EXISTS idx_messages_receiver ON messages(receiver_id);
 CREATE INDEX IF NOT EXISTS idx_message_reads_msg ON message_reads(message_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_recipient_created ON notifications(recipient_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_notifications_recipient_unread ON notifications(recipient_id, is_read) WHERE is_read = FALSE;
 
+-- Soft delete indexes for fast queries
+CREATE INDEX IF NOT EXISTS idx_company_members_is_deleted ON company_members(is_deleted);
+CREATE INDEX IF NOT EXISTS idx_education_is_deleted ON education(is_deleted);
+CREATE INDEX IF NOT EXISTS idx_experience_is_deleted ON experience(is_deleted);
+CREATE INDEX IF NOT EXISTS idx_notifications_is_deleted ON notifications(is_deleted);
+CREATE INDEX IF NOT EXISTS idx_memberships_is_deleted ON memberships(is_deleted);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_is_deleted ON subscriptions(is_deleted);
+CREATE INDEX IF NOT EXISTS idx_payments_is_deleted ON payments(is_deleted);
+
 -- One active subscription per user constraint
-CREATE UNIQUE INDEX IF NOT EXISTS idx_one_active_subscription_per_user ON subscriptions(user_id) WHERE status = 'ACTIVE';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_one_active_subscription_per_user ON subscriptions(user_id) WHERE status = 'ACTIVE' AND is_deleted = FALSE;
 
 -- One popular/recommended membership per role constraints
-CREATE UNIQUE INDEX IF NOT EXISTS idx_one_popular_membership_per_role ON memberships(role) WHERE is_popular = TRUE AND is_active = TRUE;
-CREATE UNIQUE INDEX IF NOT EXISTS idx_one_recommended_membership_per_role ON memberships(role) WHERE is_recommended = TRUE AND is_active = TRUE;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_one_popular_membership_per_role ON memberships(role) WHERE is_popular = TRUE AND is_active = TRUE AND is_deleted = FALSE;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_one_recommended_membership_per_role ON memberships(role) WHERE is_recommended = TRUE AND is_active = TRUE AND is_deleted = FALSE;
 
 -- Idempotency indexes for payment gateway
 CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_provider_payment_id ON payments(provider, provider_payment_id) WHERE provider_payment_id IS NOT NULL AND provider_payment_id != '';

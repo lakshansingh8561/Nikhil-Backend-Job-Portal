@@ -13,6 +13,11 @@ const companySchema = new Schema<ICompany>(
       ref: "User",
       index: true,
     },
+    ownerId: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      index: true,
+    },
     slug: {
       type: String,
       required: true,
@@ -105,3 +110,6 @@ const companySchema = new Schema<ICompany>(
 companySchema.index({ name: "text", description: "text" });
 
 export const Company = model<ICompany>("Company", companySchema);
+
+// Safely drop strict legacy unique index ownerId_1 if it exists in MongoDB
+Company.collection.dropIndex("ownerId_1").catch(() => null);

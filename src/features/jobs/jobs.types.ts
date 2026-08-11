@@ -4,48 +4,38 @@ import { ExperienceLevel } from "../../common/enums/experienceLevel.enum";
 export interface CreateJobInput {
   title: string;
   description: string;
-  location: string;
+  location?: any;
 
-  salaryMin: number;
-  salaryMax: number;
+  salaryMin?: number;
+  salaryMax?: number;
 
-  employmentType: EmploymentType;
-  experienceLevel: ExperienceLevel;
+  employmentType?: any;
+  workplaceType?: string;
+  jobType?: string;
+  experienceLevel?: any;
 
-  skills: string[];
-
-  vacancies: number;
-
-  deadline: Date;
+  skills?: string[];
+  vacancies?: number;
+  deadline?: Date;
+  requirements?: string;
+  responsibilities?: string;
+  companyId?: string;
 }
 
-export interface UpdateJobInput
-  extends Partial<CreateJobInput> {}
+export interface UpdateJobInput extends Partial<CreateJobInput> {}
 
 export interface JobQuery {
   search?: string;
-
   location?: string;
-
   industry?: string;
-
-  employmentType?: EmploymentType;
-
-  experienceLevel?: ExperienceLevel;
-
+  employmentType?: any;
+  experienceLevel?: any;
   salaryMin?: number;
-
   salaryMax?: number;
-
   skills?: string | string[];
-
-  userId?: string;
-
-  recruiterId?: string;
-
-  companyId?: string;
-
   page?: number;
-
   limit?: number;
+  userId?: string;
+  recruiterId?: string;
+  companyId?: string;
 }

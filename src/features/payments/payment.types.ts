@@ -8,6 +8,11 @@ export interface VerifyPaymentInput {
   razorpay_signature: string;
 }
 
+export interface CreatePolarCheckoutInput {
+  membershipId: string;
+  productId?: string;
+}
+
 export interface PaymentQueryFilters {
   page?: number;
   limit?: number;

@@ -1,3 +1,4 @@
+import { Types } from "mongoose";
 import { Company, CompanyMember, RecruiterProfile, User } from "../../database/models";
 import { ApiError } from "../../common/utils/ApiError";
 import { HTTP_STATUS } from "../../common/constants/httpStatus";
@@ -70,6 +71,8 @@ export class CompanyService {
     const company = await Company.create({
       name: companyName,
       slug,
+      userId: new Types.ObjectId(userId),
+      ownerId: new Types.ObjectId(userId),
       description: payload.description || "",
       industry: payload.industry || "Technology",
       companySize: payload.companySize || "1-10",
@@ -80,9 +83,9 @@ export class CompanyService {
       coverImage: payload.coverImage || "",
       location: payload.location || {},
       socialLinks: payload.socialLinks || {},
-      verificationStatus: "PENDING",
+      verificationStatus: "APPROVED",
       status: "ACTIVE",
-    });
+    } as any);
 
     await CompanyMember.create({
       companyId: company._id,
