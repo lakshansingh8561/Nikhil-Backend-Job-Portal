@@ -60,7 +60,7 @@ export class ApplicationService {
     const companyName = (job.companyId as any)?.name || "Hiring Company";
 
     if (applicantUser?.email) {
-      EmailService.sendApplicationConfirmationToJobSeeker({
+      await EmailService.sendApplicationConfirmationToJobSeeker({
         applicantEmail: applicantUser.email,
         applicantName: applicantFullName,
         jobTitle: job.title,
@@ -68,11 +68,20 @@ export class ApplicationService {
       }).catch((err) => console.error("Job seeker confirmation email failed:", err));
     }
 
-    if (job.userId) {
-      const recruiterUser = await User.findById(job.userId);
+    let recruiterUserId = job.userId || (job as any).recruiterId;
+    if (!recruiterUserId && job.companyId) {
+      const Company = (await import("../../database/models")).Company;
+      const company = await Company.findById(job.companyId);
+      if (company) {
+        recruiterUserId = company.userId || company.ownerId;
+      }
+    }
+
+    if (recruiterUserId) {
+      const recruiterUser = await User.findById(recruiterUserId);
 
       await NotificationService.createNotification({
-        recipientId: job.userId.toString(),
+        recipientId: recruiterUserId.toString(),
         senderId: userId,
         type: "APPLICATION_SUBMITTED",
         title: "New Applicant Received",
@@ -81,14 +90,15 @@ export class ApplicationService {
       }).catch(() => null);
 
       if (recruiterUser?.email) {
-        EmailService.sendApplicationSubmittedToRecruiter({
+        await EmailService.sendApplicationSubmittedToRecruiter({
           recruiterEmail: recruiterUser.email,
+          recruiterName: recruiterUser.email.split("@")[0] || "Hiring Manager",
           applicantName: applicantFullName,
           applicantEmail: applicantUser?.email || "",
           jobTitle: job.title,
           companyName,
           coverLetter: payload.coverLetter,
-        }).catch((err) => console.error("Recruiter email send failed:", err));
+        }).catch((err) => console.error("[EmailService] Recruiter application notification failed:", err));
       }
     }
 
@@ -239,15 +249,12 @@ export class ApplicationService {
       );
     }
 
-    const job = await Job.findOne({
-      _id: application.jobId,
-      userId: recruiterId,
-    });
+    const job = await Job.findById(application.jobId).populate("companyId");
 
     if (!job) {
       throw new ApiError(
-        HTTP_STATUS.FORBIDDEN,
-        "You cannot update this application."
+        HTTP_STATUS.NOT_FOUND,
+        "Associated job posting not found."
       );
     }
 
@@ -277,6 +284,9 @@ export class ApplicationService {
     } else if (payload.status === "SHORTLISTED") {
       title = "Application Shortlisted!";
       message = `Great news! Your profile has been shortlisted for "${job.title}".`;
+    } else if (payload.status === "REJECTED") {
+      title = "Application Status Update";
+      message = `Your application for "${job.title}" has been reviewed.`;
     }
 
     await NotificationService.createNotification({
@@ -289,12 +299,16 @@ export class ApplicationService {
     }).catch(() => null);
 
     if (candidateUser?.email) {
-      EmailService.sendStatusUpdateToJobSeeker({
+      const companyName = (job.companyId as any)?.name || "Hiring Company";
+      
+      await EmailService.sendStatusUpdateToJobSeeker({
         applicantEmail: candidateUser.email,
         applicantName,
         jobTitle: job.title,
+        companyName,
         status: payload.status,
-      }).catch((err) => console.error("Status update email failed:", err));
+        notes: (payload as any).note || (payload as any).notes || "",
+      }).catch((err) => console.error("[EmailService] Candidate status update email failed:", err));
     }
 
     return application;

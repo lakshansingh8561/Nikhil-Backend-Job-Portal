@@ -8,20 +8,27 @@ export interface SendMailOptions {
 }
 
 export class EmailService {
-  private static transporter = nodemailer.createTransport({
-    host: "smtp.gmail.com",
-    port: 465,
-    secure: true,
-    auth: {
-      user: process.env.EMAIL_USER || "lakshansingh8561@gmail.com",
-      pass: process.env.EMAIL_PASS || "fhjy uzti gwop lfsq",
-    },
-    tls: {
-      rejectUnauthorized: false,
-    },
-  });
+  private static getTransporter() {
+    const rawUser = (process.env.EMAIL_USER || "lakshansingh8561@gmail.com").trim();
+    const rawPass = (process.env.EMAIL_PASS || "fhjy uzti gwop lfsq").replace(/\s+/g, "");
 
-  private static fromEmail = process.env.EMAIL_FROM || "lakshansingh8561@gmail.com";
+    return nodemailer.createTransport({
+      host: "smtp.gmail.com",
+      port: 465,
+      secure: true,
+      auth: {
+        user: rawUser,
+        pass: rawPass,
+      },
+      tls: {
+        rejectUnauthorized: false,
+      },
+    });
+  }
+
+  private static get fromEmail() {
+    return (process.env.EMAIL_FROM || process.env.EMAIL_USER || "lakshansingh8561@gmail.com").trim();
+  }
 
   /**
    * Generic send email method
@@ -30,10 +37,10 @@ export class EmailService {
     try {
       if (!to) return false;
       
-      // Auto-generate plain text fallback if not explicitly provided
       const plainText = text || html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+      const transporter = this.getTransporter();
 
-      const info = await this.transporter.sendMail({
+      const info = await transporter.sendMail({
         from: `"JobBox Portal" <${this.fromEmail}>`,
         to,
         subject,

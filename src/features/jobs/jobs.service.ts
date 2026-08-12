@@ -35,44 +35,10 @@ export class JobService {
     }
 
     if (!company) {
-      const recruiterProfile = await RecruiterProfile.findOne({ userId }).catch(() => null);
-      const compName = recruiterProfile?.currentCompany?.trim() || "Innovate Tech Solutions";
-
-      try {
-        company = await Company.create({
-          name: compName,
-          companyName: compName,
-          slug: `company-${userId.slice(-6)}-${Date.now()}`,
-          userId: new Types.ObjectId(userId),
-          ownerId: new Types.ObjectId(userId),
-          industry: "Information Technology",
-          companySize: "1-10",
-          verificationStatus: "APPROVED",
-          isVerified: true,
-        } as any);
-      } catch (err: any) {
-        console.warn("Company creation warning, fetching fallback company:", err?.message);
-        company = await Company.findOne();
-        if (!company) {
-          company = await Company.create({
-            name: compName,
-            companyName: compName,
-            slug: `company-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
-            userId: new Types.ObjectId(userId),
-            ownerId: new Types.ObjectId(userId),
-            industry: "Information Technology",
-            companySize: "1-10",
-            verificationStatus: "APPROVED",
-            isVerified: true,
-          } as any);
-        }
-      }
-
-      await CompanyMember.create({
-        companyId: company._id,
-        userId: new Types.ObjectId(userId),
-        role: "OWNER",
-      }).catch(() => null);
+      throw new ApiError(
+        HTTP_STATUS.BAD_REQUEST,
+        "Please create your company profile before posting a job!"
+      );
     } else {
       const existingMember = await CompanyMember.findOne({ companyId: company._id, userId: new Types.ObjectId(userId) });
       if (!existingMember) {

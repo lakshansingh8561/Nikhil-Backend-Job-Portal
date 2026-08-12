@@ -4,11 +4,17 @@ import { env } from "./config/env";
 import { connectDatabase } from "./config/database";
 import { initSocketServer } from "./socket";
 import { MembershipService } from "./features/memberships";
+import { startSubscriptionScheduler } from "./common/scheduler/subscriptionScheduler";
 
 const startServer = async () => {
   try {
     await connectDatabase();
     await MembershipService.seedDefaultMemberships();
+
+    // Run an immediate sweep on startup to catch any subscriptions that
+    // expired while the server was down, then start the recurring cron jobs.
+    await MembershipService.expireOverdueSubscriptions();
+    startSubscriptionScheduler();
 
     const server = http.createServer(app);
     initSocketServer(server);

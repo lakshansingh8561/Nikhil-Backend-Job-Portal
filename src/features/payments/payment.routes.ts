@@ -25,6 +25,9 @@ router.post(
   PaymentController.verifyPayment
 );
 
+router.get("/preview-upgrade", PaymentController.previewUpgrade);
+router.post("/preview-upgrade", PaymentController.previewUpgrade);
+
 router.get("/my", PaymentController.getUserPayments);
 
 // Polar Sandbox Protected routes

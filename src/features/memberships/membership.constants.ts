@@ -5,6 +5,9 @@ export const MEMBERSHIP_MESSAGES = {
   ONLY_RECRUITERS_ALLOWED: "Only Recruiters can subscribe to recruiter membership plans.",
   MEMBERSHIP_NOT_FOUND: "Membership plan not found or inactive.",
   ALREADY_SUBSCRIBED: "You are already subscribed to this plan.",
+  SAME_PLAN_ACTIVE: "You are already subscribed to this plan.",
+  HIGHER_PLAN_ACTIVE: "Cannot purchase a lower-level plan while your higher plan is currently active.",
+  DOWNGRADE_NOT_ALLOWED: "Downgrading is not permitted during an active subscription period.",
   SUBSCRIPTION_SUCCESS: "Membership subscription activated successfully.",
   CANCEL_SUCCESS: "Subscription cancelled successfully.",
   NO_ACTIVE_SUBSCRIPTION: "You do not have an active subscription.",
@@ -16,6 +19,19 @@ export const MEMBERSHIP_MESSAGES = {
   PROFESSIONAL_RECRUITER_REQUIRED: "Professional or Enterprise Recruiter membership required.",
   ENTERPRISE_RECRUITER_REQUIRED: "Enterprise Recruiter membership required.",
   JOB_POST_LIMIT_EXCEEDED: "Upgrade your membership to create more jobs. Free plan is limited to 3 active jobs.",
+};
+
+export const PLAN_LEVELS: Record<string, Record<string, number>> = {
+  [Role.JOB_SEEKER]: {
+    Free: 1,
+    Pro: 2,
+    Premium: 3,
+  },
+  [Role.RECRUITER]: {
+    Free: 1,
+    Professional: 2,
+    Enterprise: 3,
+  },
 };
 
 export const DEFAULT_MEMBERSHIP_PLANS = [

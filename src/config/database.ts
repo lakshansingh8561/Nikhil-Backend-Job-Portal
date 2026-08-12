@@ -16,6 +16,8 @@ export const connectDatabase = async (): Promise<void> => {
       const problematicIndexes = [
         "provider_1_providerPaymentId_1",
         "providerPaymentId_1",
+        "razorpayOrderId_1",
+        "razorpayPaymentId_1",
       ];
 
       for (const indexName of problematicIndexes) {
@@ -59,6 +61,27 @@ export const connectDatabase = async (): Promise<void> => {
         }
       }
     } catch (cleanAppErr) {
+      // Ignore if collection doesn't exist yet
+    }
+
+    // Clean up legacy company indexes (companyName_1 / ownerId_1)
+    try {
+      const companyCollection = mongoose.connection.collection("companies");
+      const companyIndexes = await companyCollection.indexes();
+
+      const badCompanyIndexes = [
+        "companyName_1",
+        "companyName",
+        "ownerId_1",
+      ];
+
+      for (const indexName of badCompanyIndexes) {
+        if (companyIndexes.some((idx) => idx.name === indexName)) {
+          await companyCollection.dropIndex(indexName);
+          console.log(`🗑️ Dropped legacy company index: ${indexName}`);
+        }
+      }
+    } catch (cleanCompErr) {
       // Ignore if collection doesn't exist yet
     }
   } catch (error) {

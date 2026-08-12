@@ -8,6 +8,9 @@ import { Role } from "../../common/enums";
 
 const router = Router();
 
+// Public: Fetch top recruiters/companies for home page
+router.get("/top", CompanyController.getTopCompanies);
+
 router.post(
   "/",
   authenticate,
