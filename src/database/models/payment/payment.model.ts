@@ -1,5 +1,6 @@
 import { Schema, model } from "mongoose";
 import { IPayment } from "./payment.interface";
+import { PaymentProvider, PaymentStatus } from "../../../common/enums";
 
 const paymentSchema = new Schema<IPayment>(
   {
@@ -12,7 +13,7 @@ const paymentSchema = new Schema<IPayment>(
     membershipId: {
       type: Schema.Types.ObjectId,
       ref: "Membership",
-      default: null,
+      required: true,
       index: true,
     },
     subscriptionId: {
@@ -28,34 +29,22 @@ const paymentSchema = new Schema<IPayment>(
     },
     currency: {
       type: String,
+      required: true,
       default: "INR",
+      uppercase: true,
       trim: true,
-    },
-    status: {
-      type: String,
-      enum: ["PENDING", "AUTHORIZED", "CAPTURED", "SUCCESS", "FAILED", "REFUNDED"],
-      default: "PENDING",
-      index: true,
     },
     provider: {
       type: String,
-      enum: ["RAZORPAY", "STRIPE", "PAYPAL", "MANUAL"],
-      default: "RAZORPAY",
+      enum: Object.values(PaymentProvider),
+      required: true,
+      index: true,
     },
-    razorpayOrderId: {
+    status: {
       type: String,
-      default: null,
-      trim: true,
-    },
-    razorpayPaymentId: {
-      type: String,
-      default: null,
-      trim: true,
-    },
-    razorpaySignature: {
-      type: String,
-      default: null,
-      trim: true,
+      enum: Object.values(PaymentStatus),
+      default: PaymentStatus.PENDING,
+      index: true,
     },
     providerPaymentId: {
       type: String,
@@ -67,7 +56,12 @@ const paymentSchema = new Schema<IPayment>(
       default: null,
       trim: true,
     },
-    method: {
+    providerSubscriptionId: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    paymentMethod: {
       type: String,
       default: null,
       trim: true,
@@ -77,11 +71,19 @@ const paymentSchema = new Schema<IPayment>(
       default: null,
       trim: true,
     },
+    providerData: {
+      type: Schema.Types.Mixed,
+      default: {},
+    },
     metadata: {
       type: Schema.Types.Mixed,
       default: {},
     },
     paidAt: {
+      type: Date,
+      default: null,
+    },
+    refundedAt: {
       type: Date,
       default: null,
     },
@@ -100,8 +102,19 @@ const paymentSchema = new Schema<IPayment>(
   }
 );
 
-paymentSchema.index({ userId: 1, status: 1 });
-paymentSchema.index({ razorpayOrderId: 1 }, { unique: true, sparse: true });
-paymentSchema.index({ razorpayPaymentId: 1 }, { unique: true, sparse: true });
+paymentSchema.index({
+  userId: 1,
+  status: 1,
+});
+
+paymentSchema.index({
+  provider: 1,
+  providerPaymentId: 1,
+});
+
+paymentSchema.index({
+  provider: 1,
+  providerOrderId: 1,
+});
 
 export const Payment = model<IPayment>("Payment", paymentSchema);

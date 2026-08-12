@@ -1,18 +1,23 @@
 import { Payment, IPayment } from "../../database/models";
 import { FilterQuery, Types } from "mongoose";
 import { PaymentQueryFilters } from "./payment.types";
+import { PaymentProvider } from "../../common/enums";
 
 export class PaymentRepository {
   static async createPayment(data: Partial<IPayment>): Promise<IPayment> {
     return Payment.create(data);
   }
 
-  static async findByRazorpayOrderId(orderId: string): Promise<IPayment | null> {
-    return Payment.findOne({ razorpayOrderId: orderId });
+  static async findByProviderOrderId(provider: PaymentProvider | string, orderId: string): Promise<IPayment | null> {
+    return Payment.findOne({ providerOrderId: orderId });
   }
 
-  static async findByRazorpayPaymentId(paymentId: string): Promise<IPayment | null> {
-    return Payment.findOne({ razorpayPaymentId: paymentId });
+  static async findByProviderPaymentId(provider: PaymentProvider | string, paymentId: string): Promise<IPayment | null> {
+    return Payment.findOne({ providerPaymentId: paymentId });
+  }
+
+  static async findByRazorpayOrderId(orderId: string): Promise<IPayment | null> {
+    return Payment.findOne({ providerOrderId: orderId });
   }
 
   static async findUserPayments(userId: string): Promise<IPayment[]> {
@@ -30,11 +35,11 @@ export class PaymentRepository {
     const query: FilterQuery<IPayment> = {};
 
     if (filters.status) {
-      query.status = filters.status;
+      query.status = filters.status as any;
     }
 
     if (filters.provider) {
-      query.provider = filters.provider;
+      query.provider = filters.provider as any;
     }
 
     if (filters.startDate || filters.endDate) {

@@ -1,26 +1,34 @@
 import { Document, Types } from "mongoose";
 
-export type SubscriptionStatus = "ACTIVE" | "EXPIRED" | "CANCELLED" | "PENDING" | "PAST_DUE";
-export type SubscriptionPaymentStatus = "PENDING" | "SUCCESS" | "FAILED" | "PAID" | "REFUNDED";
+export type SubscriptionStatus = "PENDING" | "ACTIVE" | "EXPIRED" | "CANCELLED" | "PAST_DUE";
+export type BillingCycle = "monthly" | "yearly";
 
 export interface ISubscription extends Document {
   userId: Types.ObjectId;
   membershipId: Types.ObjectId;
-  role?: string;
+  role: string;
   planName: string;
   amount: number;
   currency: string;
+  billingCycle: BillingCycle;
   startDate: Date;
   endDate: Date;
-  currentPeriodStart?: Date;
-  currentPeriodEnd?: Date;
-  razorpaySubscriptionId?: string;
+  currentPeriodStart: Date;
+  currentPeriodEnd: Date;
   status: SubscriptionStatus;
-  paymentStatus: SubscriptionPaymentStatus;
   autoRenew: boolean;
+  // Recurring / AutoPay fields
+  providerSubscriptionId?: string | null;
+  providerCustomerId?: string | null;
+  cancelAtPeriodEnd: boolean;
+  nextBillingDate?: Date | null;
+  lastPaymentStatus?: string | null;
+  // Cancellation
   cancelledAt?: Date | null;
+  cancelledReason?: string | null;
   isDeleted: boolean;
   deletedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
+

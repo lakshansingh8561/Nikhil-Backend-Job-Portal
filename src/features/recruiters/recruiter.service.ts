@@ -1,4 +1,4 @@
-import { RecruiterProfile, User, Job } from "../../database/models";
+import { RecruiterProfile, User, Job, Company } from "../../database/models";
 import { ApiError } from "../../common/utils/ApiError";
 import { HTTP_STATUS } from "../../common/constants/httpStatus";
 import { Role } from "../../common/enums";
@@ -92,6 +92,14 @@ export class RecruiterService {
 
     if (query.search && String(query.search).trim()) {
       const s = escapeRegExp(String(query.search).trim());
+      const matchingCompanies = await Company.find({
+        $or: [
+          { name: { $regex: s, $options: "i" } },
+          { companyName: { $regex: s, $options: "i" } },
+        ],
+      }).select("_id");
+      const companyIds = matchingCompanies.map((c) => c._id);
+
       filter.$or = [
         { firstName: { $regex: s, $options: "i" } },
         { lastName: { $regex: s, $options: "i" } },
@@ -99,12 +107,24 @@ export class RecruiterService {
         { designation: { $regex: s, $options: "i" } },
         { bio: { $regex: s, $options: "i" } },
         { headline: { $regex: s, $options: "i" } },
+        { companyId: { $in: companyIds } },
       ];
     }
 
     if (query.letter && String(query.letter).trim()) {
       const l = escapeRegExp(String(query.letter).trim());
-      filter.currentCompany = { $regex: `^${l}`, $options: "i" };
+      const matchingCompanies = await Company.find({
+        $or: [
+          { name: { $regex: `^${l}`, $options: "i" } },
+          { companyName: { $regex: `^${l}`, $options: "i" } },
+        ],
+      }).select("_id");
+      const companyIds = matchingCompanies.map((c) => c._id);
+
+      filter.$or = [
+        { currentCompany: { $regex: `^${l}`, $options: "i" } },
+        { companyId: { $in: companyIds } },
+      ];
     }
 
     if (query.location && String(query.location).trim()) {
@@ -163,15 +183,27 @@ export class RecruiterService {
 
     const total = await RecruiterProfile.countDocuments(filter);
 
-    // Compute real open jobs count for each recruiter
+    // Compute real open jobs count and ensure companyId is populated for each recruiter
     const recruitersWithJobs = await Promise.all(
       recruiters.map(async (rec) => {
         const recObj = rec.toObject();
         const recUserId = typeof rec.userId === "object" && rec.userId !== null ? (rec.userId as any)._id : rec.userId;
+
+        if (!recObj.companyId && recUserId) {
+          const comp = await Company.findOne({
+            $or: [{ userId: recUserId }, { ownerId: recUserId }],
+          }).catch(() => null);
+          if (comp) {
+            recObj.companyId = comp;
+            recObj.currentCompany = comp.name;
+          }
+        }
+
         const openJobsCount = await Job.countDocuments({
           userId: recUserId,
           isActive: true,
         });
+
         return {
           ...recObj,
           openJobsCount,

@@ -17,8 +17,9 @@ const subscriptionSchema = new Schema<ISubscription>(
     },
     role: {
       type: String,
-      default: "JOB_SEEKER",
+      required: true,
       trim: true,
+      index: true,
     },
     planName: {
       type: String,
@@ -32,12 +33,19 @@ const subscriptionSchema = new Schema<ISubscription>(
     },
     currency: {
       type: String,
+      required: true,
       default: "INR",
+      uppercase: true,
       trim: true,
+    },
+    billingCycle: {
+      type: String,
+      enum: ["monthly", "yearly"],
+      default: "monthly",
+      index: true,
     },
     startDate: {
       type: Date,
-      default: Date.now,
       required: true,
     },
     endDate: {
@@ -47,35 +55,57 @@ const subscriptionSchema = new Schema<ISubscription>(
     },
     currentPeriodStart: {
       type: Date,
-      default: Date.now,
+      required: true,
     },
     currentPeriodEnd: {
       type: Date,
-    },
-    razorpaySubscriptionId: {
-      type: String,
-      default: "",
-      trim: true,
+      required: true,
+      index: true,
     },
     status: {
       type: String,
-      enum: ["ACTIVE", "EXPIRED", "CANCELLED", "PENDING", "PAST_DUE"],
-      default: "PENDING",
-      index: true,
-    },
-    paymentStatus: {
-      type: String,
-      enum: ["PENDING", "SUCCESS", "FAILED", "PAID", "REFUNDED"],
+      enum: ["PENDING", "ACTIVE", "EXPIRED", "CANCELLED", "PAST_DUE"],
       default: "PENDING",
       index: true,
     },
     autoRenew: {
       type: Boolean,
-      default: true,
+      default: false,
+    },
+    // Recurring / AutoPay fields
+    providerSubscriptionId: {
+      type: String,
+      default: null,
+      trim: true,
+      index: true,
+    },
+    providerCustomerId: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    cancelAtPeriodEnd: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    nextBillingDate: {
+      type: Date,
+      default: null,
+    },
+    lastPaymentStatus: {
+      type: String,
+      default: null,
+      trim: true,
     },
     cancelledAt: {
       type: Date,
       default: null,
+    },
+    cancelledReason: {
+      type: String,
+      default: null,
+      trim: true,
     },
     isDeleted: {
       type: Boolean,
@@ -92,7 +122,17 @@ const subscriptionSchema = new Schema<ISubscription>(
   }
 );
 
-subscriptionSchema.index({ userId: 1, status: 1 });
-subscriptionSchema.index({ endDate: 1, status: 1 });
+subscriptionSchema.index({
+  userId: 1,
+  status: 1,
+});
 
-export const Subscription = model<ISubscription>("Subscription", subscriptionSchema);
+subscriptionSchema.index({
+  endDate: 1,
+  status: 1,
+});
+
+export const Subscription = model<ISubscription>(
+  "Subscription",
+  subscriptionSchema
+);

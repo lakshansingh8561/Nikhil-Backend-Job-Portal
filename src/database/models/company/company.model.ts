@@ -111,5 +111,7 @@ companySchema.index({ name: "text", description: "text" });
 
 export const Company = model<ICompany>("Company", companySchema);
 
-// Safely drop strict legacy unique index ownerId_1 if it exists in MongoDB
+// Safely drop strict legacy unique indexes if they exist in MongoDB
 Company.collection.dropIndex("ownerId_1").catch(() => null);
+Company.collection.dropIndex("companyName_1").catch(() => null);
+Company.collection.dropIndex("companyName").catch(() => null);

@@ -48,6 +48,18 @@ export class PaymentController {
     res.status(HTTP_STATUS.OK).json(result);
   });
 
+  static previewUpgrade = asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const userId = getUserIdFromReq(req);
+    const userRole = getUserRoleFromReq(req);
+    const membershipId = (req.query.membershipId as string) || (req.body.membershipId as string);
+
+    const result = await PaymentService.previewUpgrade(userId, userRole, membershipId);
+
+    res.status(HTTP_STATUS.OK).json(
+      new ApiResponse(true, "Upgrade preview calculated successfully.", result)
+    );
+  });
+
   static getUserPayments = asyncHandler(async (req: Request, res: Response): Promise<void> => {
     const userId = getUserIdFromReq(req);
 
@@ -91,6 +103,90 @@ export class PaymentController {
 
     res.status(HTTP_STATUS.OK).json(
       new ApiResponse(true, "Checkout status fetched successfully.", result)
+    );
+  });
+
+  // ==========================================
+  // RAZORPAY SUBSCRIPTION (RECURRING / AUTOPAY)
+  // ==========================================
+  static createRazorpaySubscription = asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const userId = getUserIdFromReq(req);
+    const userRole = getUserRoleFromReq(req);
+    const { membershipId, planKey, billingCycle } = req.body;
+
+    const { RazorpaySubscriptionService } = await import("./razorpay-subscription.service");
+    const result = await RazorpaySubscriptionService.createSubscription(
+      userId,
+      userRole,
+      membershipId,
+      planKey,
+      billingCycle
+    );
+
+    res.status(HTTP_STATUS.OK).json(
+      new ApiResponse(true, "Razorpay subscription created successfully.", result)
+    );
+  });
+
+  static verifyRazorpaySubscription = asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const userId = getUserIdFromReq(req);
+    const userRole = getUserRoleFromReq(req);
+
+    const { RazorpaySubscriptionService } = await import("./razorpay-subscription.service");
+    const result = await RazorpaySubscriptionService.verifySubscriptionPayment(
+      userId,
+      userRole,
+      req.body
+    );
+
+    res.status(HTTP_STATUS.OK).json(
+      new ApiResponse(true, result.message, result)
+    );
+  });
+
+  // ==========================================
+  // CANCEL / REACTIVATE AUTOPAY (both providers)
+  // ==========================================
+  static cancelAutopay = asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const userId = getUserIdFromReq(req);
+    const cancelAtPeriodEnd: boolean = req.body.cancelAtPeriodEnd !== false; // default true
+
+    // Detect provider from active subscription
+    const { Subscription } = await import("../../database/models");
+    const { Types } = await import("mongoose");
+    const sub = await Subscription.findOne({
+      userId: new Types.ObjectId(userId),
+      status: "ACTIVE",
+    });
+
+    if (!sub) {
+      throw new Error("No active subscription found.");
+    }
+
+    let result: any;
+    if (sub.providerSubscriptionId?.startsWith("sub_")) {
+      // Razorpay subscription IDs start with sub_
+      const { RazorpaySubscriptionService } = await import("./razorpay-subscription.service");
+      result = await RazorpaySubscriptionService.cancelSubscription(userId, cancelAtPeriodEnd);
+    } else {
+      // Default to Polar
+      const { PolarService } = await import("./polar.service");
+      result = await PolarService.cancelAutoPay(userId);
+    }
+
+    res.status(HTTP_STATUS.OK).json(
+      new ApiResponse(true, result.message, result)
+    );
+  });
+
+  static reactivateAutopay = asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const userId = getUserIdFromReq(req);
+
+    const { PolarService } = await import("./polar.service");
+    const result = await PolarService.reactivateAutoPay(userId);
+
+    res.status(HTTP_STATUS.OK).json(
+      new ApiResponse(true, result.message, result)
     );
   });
 }

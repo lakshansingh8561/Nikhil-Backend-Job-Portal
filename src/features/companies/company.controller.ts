@@ -35,6 +35,19 @@ export class CompanyController {
     );
   });
 
+  static getTopCompanies = asyncHandler(async (req: Request, res: Response) => {
+    const limit = Number(req.query.limit) || 10;
+    const companies = await CompanyService.getTopCompanies(limit);
+
+    res.status(HTTP_STATUS.OK).json(
+      new ApiResponse(
+        true,
+        "Top recruiters fetched successfully.",
+        companies
+      )
+    );
+  });
+
   static updateCompany = asyncHandler(async (req: Request, res: Response) => {
     const companyId = req.params.id ? (Array.isArray(req.params.id) ? req.params.id[0] : req.params.id) : undefined;
     const company = await CompanyService.updateCompany(

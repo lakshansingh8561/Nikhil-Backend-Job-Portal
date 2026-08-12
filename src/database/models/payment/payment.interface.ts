@@ -1,25 +1,23 @@
 import { Document, Types } from "mongoose";
-
-export type PaymentTransactionStatus = "PENDING" | "AUTHORIZED" | "CAPTURED" | "SUCCESS" | "FAILED" | "REFUNDED";
-export type PaymentProvider = "RAZORPAY" | "STRIPE" | "PAYPAL" | "MANUAL";
+import { PaymentProvider, PaymentStatus } from "../../../common/enums";
 
 export interface IPayment extends Document {
   userId: Types.ObjectId;
-  membershipId?: Types.ObjectId;
-  subscriptionId?: Types.ObjectId;
-  amount: number; // Stored in smallest currency unit (paise) or base currency
+  membershipId: Types.ObjectId;
+  subscriptionId?: Types.ObjectId | null;
+  amount: number;
   currency: string;
-  status: PaymentTransactionStatus;
   provider: PaymentProvider;
-  razorpayOrderId?: string;
-  razorpayPaymentId?: string;
-  razorpaySignature?: string;
-  providerPaymentId?: string;
-  providerOrderId?: string;
-  method?: string;
-  failureReason?: string;
+  status: PaymentStatus;
+  providerPaymentId?: string | null;
+  providerOrderId?: string | null;
+  providerSubscriptionId?: string | null;
+  paymentMethod?: string | null;
+  failureReason?: string | null;
+  providerData?: Record<string, any>;
   metadata?: Record<string, any>;
-  paidAt?: Date;
+  paidAt?: Date | null;
+  refundedAt?: Date | null;
   isDeleted: boolean;
   deletedAt?: Date | null;
   createdAt: Date;
