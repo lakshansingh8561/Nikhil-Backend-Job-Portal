@@ -5,6 +5,7 @@ import {
   IMembership,
   ISubscription,
 } from "../../database/models";
+import { SubscriptionStatus } from "../../common/enums/subscriptionStatus.enum";
 
 export class MembershipRepository {
   /**
@@ -19,14 +20,14 @@ export class MembershipRepository {
    * Find active memberships by role
    */
   static async findActiveMemberships(role: string): Promise<IMembership[]> {
-    return Membership.find({ role, isActive: true }).sort({ price: 1 });
+    return Membership.find({ role, isActive: true, isDeleted: { $ne: true } }).sort({ price: 1 });
   }
 
   /**
    * Count total memberships in DB (used for seeding)
    */
   static async countMemberships(): Promise<number> {
-    return Membership.countDocuments();
+    return Membership.countDocuments({ isDeleted: { $ne: true } });
   }
 
   /**
@@ -42,7 +43,8 @@ export class MembershipRepository {
   static async findActiveSubscription(userId: string): Promise<ISubscription | null> {
     return Subscription.findOne({
       userId: new Types.ObjectId(userId),
-      status: "ACTIVE",
+      status: SubscriptionStatus.ACTIVE,
+      isDeleted: { $ne: true },
     }).populate("membershipId");
   }
 
@@ -53,11 +55,11 @@ export class MembershipRepository {
     await Subscription.updateMany(
       {
         userId: new Types.ObjectId(userId),
-        status: "ACTIVE",
+        status: SubscriptionStatus.ACTIVE,
       },
       {
         $set: {
-          status: "EXPIRED",
+          status: SubscriptionStatus.EXPIRED,
         },
       }
     );
@@ -72,16 +74,34 @@ export class MembershipRepository {
   }
 
   /**
-   * Cancel subscription
+   * Cancel AutoPay for subscription (remains ACTIVE until paid period ends)
    */
-  static async cancelSubscription(subscriptionId: string): Promise<ISubscription | null> {
+  static async cancelSubscription(subscriptionId: string, reason = "Cancelled AutoPay by user"): Promise<ISubscription | null> {
     return Subscription.findByIdAndUpdate(
       subscriptionId,
       {
         $set: {
-          status: "CANCELLED",
-          autoRenew: false,
+          cancelAtPeriodEnd: true,
           cancelledAt: new Date(),
+          cancelledReason: reason,
+        },
+      },
+      { new: true }
+    ).populate("membershipId");
+  }
+
+  /**
+   * Immediately terminate/cancel subscription (e.g. on upgrade or admin action)
+   */
+  static async terminateSubscription(subscriptionId: string, reason = "Terminated"): Promise<ISubscription | null> {
+    return Subscription.findByIdAndUpdate(
+      subscriptionId,
+      {
+        $set: {
+          status: SubscriptionStatus.CANCELLED,
+          cancelAtPeriodEnd: true,
+          cancelledAt: new Date(),
+          cancelledReason: reason,
         },
       },
       { new: true }
@@ -94,6 +114,7 @@ export class MembershipRepository {
   static async findSubscriptionHistory(userId: string): Promise<ISubscription[]> {
     return Subscription.find({
       userId: new Types.ObjectId(userId),
+      isDeleted: { $ne: true },
     })
       .populate("membershipId")
       .sort({ createdAt: -1 });

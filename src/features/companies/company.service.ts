@@ -67,12 +67,13 @@ export class CompanyService {
           isActive: true,
         });
 
+        const recAny = rec as any;
         const companyObj = typeof rec.companyId === "object" && rec.companyId !== null ? (rec.companyId as any) : null;
-        const name = companyObj?.name || rec.currentCompany || `${rec.firstName || ""} ${rec.lastName || ""}`.trim() || "Recruiter";
-        const logo = companyObj?.logo || rec.companyLogo || rec.profilePicture || "";
+        const name = companyObj?.name || recAny.currentCompany || `${recAny.firstName || ""} ${recAny.lastName || ""}`.trim() || "Recruiter";
+        const logo = companyObj?.logo || recAny.companyLogo || recAny.profilePicture || "";
         const locationStr = companyObj?.location?.city
           ? `${companyObj.location.city}${companyObj.location.country ? `, ${companyObj.location.country}` : ""}`
-          : rec.currentLocation || "Location Not Specified";
+          : recAny.currentLocation || "Location Not Specified";
 
         return {
           _id: rec._id.toString(),

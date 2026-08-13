@@ -76,9 +76,13 @@ export class PaymentController {
   static createPolarCheckout = asyncHandler(async (req: Request, res: Response): Promise<void> => {
     const userId = getUserIdFromReq(req);
     const userRole = getUserRoleFromReq(req);
+    const origin = (req.headers.origin as string) || (req.headers.referer as string) || "";
 
     const { PolarService } = await import("./polar.service");
-    const result = await PolarService.createCheckoutSession(userId, userRole, req.body);
+    const result = await PolarService.createCheckoutSession(userId, userRole, {
+      ...req.body,
+      origin,
+    });
 
     res.status(HTTP_STATUS.OK).json(
       new ApiResponse(true, "Polar Sandbox Checkout Session created successfully.", result)
@@ -95,7 +99,12 @@ export class PaymentController {
   });
 
   static getPolarStatus = asyncHandler(async (req: Request, res: Response): Promise<void> => {
-    const userId = getUserIdFromReq(req);
+    let userId = "";
+    try {
+      userId = getUserIdFromReq(req);
+    } catch {
+      // Unauthenticated request fallback (e.g. redirected from gateway without auth header)
+    }
     const checkoutId = (req.params.checkoutId as string) || "";
 
     const { PolarService } = await import("./polar.service");

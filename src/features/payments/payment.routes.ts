@@ -6,11 +6,12 @@ import { createOrderSchema, verifyPaymentSchema, createPolarCheckoutSchema } fro
 
 const router = Router();
 
-// Public Webhook routes (No JWT auth, signature verified by webhook handler)
+// Public Webhook & Status Check routes (No JWT auth strictly required for checkout status verification)
 router.post("/webhook", PaymentController.handleWebhook);
 router.post("/polar/webhook", PaymentController.handlePolarWebhook);
+router.get("/polar/status/:checkoutId", PaymentController.getPolarStatus);
 
-// Protected routes
+// Protected routes requiring authentication
 router.use(authenticate);
 
 router.post(
@@ -30,13 +31,15 @@ router.post("/preview-upgrade", PaymentController.previewUpgrade);
 
 router.get("/my", PaymentController.getUserPayments);
 
-// Polar Sandbox Protected routes
+// AutoPay cancellation / reactivation routes
+router.post("/cancel-autopay", PaymentController.cancelAutopay);
+router.post("/reactivate-autopay", PaymentController.reactivateAutopay);
+
+// Polar Sandbox Protected Checkout Creation
 router.post(
   "/polar/create-checkout",
   validate(createPolarCheckoutSchema),
   PaymentController.createPolarCheckout
 );
-
-router.get("/polar/status/:checkoutId", PaymentController.getPolarStatus);
 
 export default router;

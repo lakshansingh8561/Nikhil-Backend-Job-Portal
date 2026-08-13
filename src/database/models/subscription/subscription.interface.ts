@@ -1,7 +1,9 @@
 import { Document, Types } from "mongoose";
+import { PaymentProvider } from "../../../common/enums/paymentProvider.enum";
+import { SubscriptionStatus } from "../../../common/enums/subscriptionStatus.enum";
+import { BillingCycle } from "../membership/membership.interface";
 
-export type SubscriptionStatus = "PENDING" | "ACTIVE" | "EXPIRED" | "CANCELLED" | "PAST_DUE";
-export type BillingCycle = "monthly" | "yearly";
+export { SubscriptionStatus, BillingCycle };
 
 export interface ISubscription extends Document {
   userId: Types.ObjectId;
@@ -11,12 +13,12 @@ export interface ISubscription extends Document {
   amount: number;
   currency: string;
   billingCycle: BillingCycle;
+  provider: PaymentProvider;
   startDate: Date;
   endDate: Date;
   currentPeriodStart: Date;
   currentPeriodEnd: Date;
   status: SubscriptionStatus;
-  autoRenew: boolean;
   // Recurring / AutoPay fields
   providerSubscriptionId?: string | null;
   providerCustomerId?: string | null;
@@ -31,4 +33,3 @@ export interface ISubscription extends Document {
   createdAt: Date;
   updatedAt: Date;
 }
-

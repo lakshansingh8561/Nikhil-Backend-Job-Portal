@@ -72,8 +72,9 @@ export class ApplicationService {
     if (!recruiterUserId && job.companyId) {
       const Company = (await import("../../database/models")).Company;
       const company = await Company.findById(job.companyId);
-      if (company) {
-        recruiterUserId = company.userId || company.ownerId;
+      const owner = company?.userId || company?.ownerId;
+      if (company && owner) {
+        recruiterUserId = owner as Types.ObjectId;
       }
     }
 

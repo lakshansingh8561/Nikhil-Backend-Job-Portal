@@ -1,6 +1,60 @@
 import { Schema, model } from "mongoose";
 import { IMembership } from "./membership.interface";
 import { Role } from "../../../common/enums/role.enum";
+import { PaymentProvider } from "../../../common/enums/paymentProvider.enum";
+
+const providerPriceIdSchema = new Schema(
+  {
+    provider: {
+      type: String,
+      enum: Object.values(PaymentProvider),
+      required: true,
+    },
+    providerPlanId: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    providerProductId: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+  },
+  { _id: false }
+);
+
+const membershipPriceSchema = new Schema(
+  {
+    billingCycle: {
+      type: String,
+      enum: ["monthly", "yearly"],
+      required: true,
+      default: "monthly",
+    },
+    price: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
+    currency: {
+      type: String,
+      default: "INR",
+      uppercase: true,
+      trim: true,
+    },
+    durationInDays: {
+      type: Number,
+      default: 30,
+      min: 1,
+    },
+    providerPriceIds: {
+      type: [providerPriceIdSchema],
+      default: [],
+    },
+  },
+  { _id: false }
+);
 
 const membershipFeatureSchema = new Schema(
   {
@@ -38,6 +92,10 @@ const membershipSchema = new Schema<IMembership>(
       type: Number,
       default: 30,
       min: 1,
+    },
+    prices: {
+      type: [membershipPriceSchema],
+      default: [],
     },
     description: {
       type: String,

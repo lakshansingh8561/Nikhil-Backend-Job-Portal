@@ -2,6 +2,7 @@ import { z } from "zod";
 
 export const createOrderSchema = z.object({
   membershipId: z.string().min(1, "Membership ID is required"),
+  billingCycle: z.enum(["monthly", "yearly"] as const).optional().default("monthly"),
 });
 
 export const verifyPaymentSchema = z.object({
@@ -13,13 +14,13 @@ export const verifyPaymentSchema = z.object({
 export const createPolarCheckoutSchema = z.object({
   membershipId: z.string().min(1, "Membership ID is required"),
   productId: z.string().optional(),
-  billingCycle: z.enum(["monthly", "yearly"]).optional().default("monthly"),
+  billingCycle: z.enum(["monthly", "yearly"] as const).optional().default("monthly"),
 });
 
 export const createRazorpaySubscriptionSchema = z.object({
   membershipId: z.string().min(1, "Membership ID is required"),
-  planKey: z.enum(["pro", "premium"], { required_error: "planKey must be 'pro' or 'premium'" }),
-  billingCycle: z.enum(["monthly", "yearly"], { required_error: "billingCycle is required" }),
+  planKey: z.enum(["pro", "premium", "professional", "enterprise"] as const),
+  billingCycle: z.enum(["monthly", "yearly"] as const),
 });
 
 export const verifyRazorpaySubscriptionSchema = z.object({
@@ -31,4 +32,3 @@ export const verifyRazorpaySubscriptionSchema = z.object({
 export const cancelAutopaySchema = z.object({
   cancelAtPeriodEnd: z.boolean().optional().default(true),
 });
-

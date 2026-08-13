@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "node --max-old-space-size=1536 ./node_modules/typescript/bin/tsc",
+    "postinstall": "npm run build",
     "start": "node dist/server.js"
   },
   "keywords": [],
