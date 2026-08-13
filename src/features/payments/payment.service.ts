@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import Razorpay from "razorpay";
 import { Types } from "mongoose";
-import { Membership, Payment, Subscription } from "../../database/models";
+import { Membership, Payment, Subscription, BillingCycle } from "../../database/models";
 import { ApiError } from "../../common/utils/ApiError";
 import { HTTP_STATUS } from "../../common/constants/httpStatus";
 import { PAYMENT_MESSAGES } from "./payment.constants";
@@ -10,7 +10,7 @@ import { PaymentRepository } from "./payment.repository";
 import { MembershipRepository } from "../memberships/membership.repository";
 import { MembershipService } from "../memberships/membership.service";
 import { Role } from "../../common/enums/role.enum";
-import { PaymentProvider, PaymentStatus } from "../../common/enums";
+import { PaymentProvider, PaymentStatus, SubscriptionStatus } from "../../common/enums";
 
 export class PaymentService {
   private static getRazorpayInstance(): Razorpay {
@@ -33,26 +33,29 @@ export class PaymentService {
   /**
    * Create Razorpay Order for Membership Purchase or Prorated Upgrade
    */
-  static async createOrder(userId: string, userRole: Role, payload: CreateOrderInput) {
+  static async createOrder(userId: string, userRole: Role, payload: CreateOrderInput & { billingCycle?: BillingCycle }) {
+    const billingCycle: BillingCycle = payload.billingCycle || "monthly";
+
     // Perform plan hierarchy verification & prorated upgrade calculation
     const upgradeCalc = await MembershipService.calculateProratedUpgrade(
       userId,
       userRole,
-      payload.membershipId
+      payload.membershipId,
+      billingCycle
     );
 
     const plan = upgradeCalc.newPlan;
     const payableAmount = upgradeCalc.finalUpgradePrice;
 
     // If Free Plan, directly activate without Razorpay order
-    if (plan.price === 0) {
-      return MembershipService.subscribe(userId, userRole, payload.membershipId);
+    if (payableAmount === 0 && plan.price === 0) {
+      return MembershipService.subscribe(userId, userRole, payload.membershipId, billingCycle, PaymentProvider.MANUAL);
     }
 
     // Paid plan: Create Razorpay Order with prorated amount
     const razorpay = this.getRazorpayInstance();
     const amountInPaise = Math.round(payableAmount * 100);
-    const currency = plan.currency || "INR";
+    const currency = upgradeCalc.currency || "INR";
     const safeUserId = String(userId || "");
     const receipt = `rcpt_${safeUserId.slice(-6)}_${Date.now()}`;
 
@@ -65,10 +68,11 @@ export class PaymentService {
         membershipId: plan._id.toString(),
         userRole,
         planName: plan.name,
+        billingCycle,
         isUpgrade: upgradeCalc.isUpgrade ? "true" : "false",
         oldSubId: upgradeCalc.currentSub ? upgradeCalc.currentSub._id.toString() : "",
         unusedCredit: upgradeCalc.unusedCredit.toString(),
-        fullPrice: plan.price.toString(),
+        fullPrice: upgradeCalc.priceDetails.price.toString(),
         finalUpgradePrice: payableAmount.toString(),
       },
     };
@@ -87,13 +91,15 @@ export class PaymentService {
       providerData: {
         receipt,
         notes: orderOptions.notes,
+        billingCycle,
       },
       metadata: {
         isUpgrade: upgradeCalc.isUpgrade,
         oldSubId: upgradeCalc.currentSub ? upgradeCalc.currentSub._id.toString() : null,
         unusedCredit: upgradeCalc.unusedCredit,
-        fullPrice: plan.price,
+        fullPrice: upgradeCalc.priceDetails.price,
         finalUpgradePrice: payableAmount,
+        billingCycle,
       },
     });
 
@@ -112,15 +118,16 @@ export class PaymentService {
         membership: {
           id: plan._id,
           name: plan.name,
-          price: plan.price,
-          currency: plan.currency,
-          durationInDays: plan.durationInDays,
+          price: upgradeCalc.priceDetails.price,
+          currency: upgradeCalc.priceDetails.currency,
+          durationInDays: upgradeCalc.priceDetails.durationInDays,
+          billingCycle,
         },
         upgradeInfo: {
           isUpgrade: upgradeCalc.isUpgrade,
           unusedCredit: upgradeCalc.unusedCredit,
           finalUpgradePrice: payableAmount,
-          originalPrice: plan.price,
+          originalPrice: upgradeCalc.priceDetails.price,
         },
       },
     };
@@ -152,7 +159,8 @@ export class PaymentService {
       const existingSub = await Subscription.findOne({
         userId: new Types.ObjectId(userId),
         membershipId: payment.membershipId,
-        status: "ACTIVE",
+        status: SubscriptionStatus.ACTIVE,
+        isDeleted: { $ne: true },
       });
       return {
         message: "Payment already verified and active.",
@@ -187,39 +195,40 @@ export class PaymentService {
       throw new ApiError(HTTP_STATUS.NOT_FOUND, PAYMENT_MESSAGES.MEMBERSHIP_NOT_FOUND);
     }
 
-    // If upgrade, mark old active subscription as REPLACED
+    const billingCycle: BillingCycle = payment.metadata?.billingCycle || "monthly";
+    const priceDetails = MembershipService.getPlanPriceDetails(plan, billingCycle);
+
+    // If upgrade, mark old active subscription as CANCELLED/Replaced
     const oldSubId = payment.metadata?.oldSubId;
     if (oldSubId) {
-      await Subscription.findByIdAndUpdate(oldSubId, {
-        $set: {
-          status: "CANCELLED",
-          cancelledAt: new Date(),
-          cancelledReason: `Upgraded to ${plan.name}`,
-          autoRenew: false,
-        },
-      });
+      await MembershipRepository.terminateSubscription(
+        oldSubId,
+        `Upgraded to ${plan.name}`
+      );
     }
 
     // Expire any other active subscriptions
     await MembershipRepository.expireActiveSubscriptions(userId);
 
-    // Create NEW 30-day subscription from current time
+    // Create NEW subscription from current time
     const startDate = new Date();
-    const endDate = new Date(startDate.getTime() + plan.durationInDays * 24 * 60 * 60 * 1000);
+    const endDate = new Date(startDate.getTime() + priceDetails.durationInDays * 24 * 60 * 60 * 1000);
 
     const subscription = await MembershipRepository.createSubscription({
       userId: new Types.ObjectId(userId),
       membershipId: plan._id as Types.ObjectId,
       role: userRole,
       planName: plan.name,
-      amount: payment.amount ? Math.round(payment.amount / 100) : plan.price,
-      currency: plan.currency || "INR",
+      amount: payment.amount ? Math.round(payment.amount / 100) : priceDetails.price,
+      currency: priceDetails.currency,
+      billingCycle,
+      provider: PaymentProvider.RAZORPAY,
       startDate,
       endDate,
       currentPeriodStart: startDate,
       currentPeriodEnd: endDate,
-      status: "ACTIVE",
-      autoRenew: true,
+      status: SubscriptionStatus.ACTIVE,
+      cancelAtPeriodEnd: false,
     });
 
     payment.status = PaymentStatus.SUCCESS;
@@ -268,7 +277,7 @@ export class PaymentService {
       return { success: true, message: PAYMENT_MESSAGES.WEBHOOK_PROCESSED, ...result };
     }
 
-    // ── One-time payment events (existing logic) ─────────────────────────────
+    // ── One-time payment events ─────────────────────────────────────────────
     const payloadEntity = event.payload?.payment?.entity || event.payload?.order?.entity;
 
     if (!payloadEntity) {
@@ -294,27 +303,30 @@ export class PaymentService {
         if (payment.membershipId && payment.userId) {
           const plan = await Membership.findById(payment.membershipId);
           if (plan) {
-            // Expire old subscriptions
             await MembershipRepository.expireActiveSubscriptions(payment.userId.toString());
 
+            const billingCycle: BillingCycle = payment.metadata?.billingCycle || "monthly";
+            const priceDetails = MembershipService.getPlanPriceDetails(plan, billingCycle);
+
             const startDate = new Date();
-            const endDate = new Date(startDate.getTime() + plan.durationInDays * 24 * 60 * 60 * 1000);
+            const endDate = new Date(startDate.getTime() + priceDetails.durationInDays * 24 * 60 * 60 * 1000);
 
             const subscription = await MembershipRepository.createSubscription({
               userId: payment.userId,
               membershipId: plan._id as Types.ObjectId,
               role: plan.role,
               planName: plan.name,
-              amount: payment.amount ? Math.round(payment.amount / 100) : plan.price,
-              currency: payment.currency || "INR",
+              amount: payment.amount ? Math.round(payment.amount / 100) : priceDetails.price,
+              currency: priceDetails.currency,
+              billingCycle,
+              provider: PaymentProvider.RAZORPAY,
               startDate,
               endDate,
               currentPeriodStart: startDate,
               currentPeriodEnd: endDate,
-              status: "ACTIVE",
-              autoRenew: true,
+              status: SubscriptionStatus.ACTIVE,
               cancelAtPeriodEnd: false,
-            } as any);
+            });
 
             payment.subscriptionId = subscription._id;
             await payment.save();
@@ -337,8 +349,8 @@ export class PaymentService {
   /**
    * Preview Upgrade calculation endpoint for UI confirmation modal
    */
-  static async previewUpgrade(userId: string, userRole: Role, membershipId: string) {
-    return MembershipService.calculateProratedUpgrade(userId, userRole, membershipId);
+  static async previewUpgrade(userId: string, userRole: Role, membershipId: string, billingCycle: BillingCycle = "monthly") {
+    return MembershipService.calculateProratedUpgrade(userId, userRole, membershipId, billingCycle);
   }
 
   /**

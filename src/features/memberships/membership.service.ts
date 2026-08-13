@@ -9,23 +9,47 @@ import {
   PLAN_LEVELS,
 } from "./membership.constants";
 import { Types } from "mongoose";
-import { Job, Payment, Subscription, User } from "../../database/models";
+import { Job, Payment, Subscription, Membership, IMembership, IMembershipPrice, BillingCycle } from "../../database/models";
 import { EmailService } from "../../common/services/email.service";
+import { PaymentProvider, SubscriptionStatus } from "../../common/enums";
 
 export class MembershipService {
   /**
-   * Helper: Expire all subscriptions that have passed their endDate
+   * Helper: Resolve price, currency, and duration for a given plan and billing cycle
+   */
+  static getPlanPriceDetails(plan: IMembership, billingCycle: BillingCycle = "monthly"): IMembershipPrice {
+    if (plan.prices && plan.prices.length > 0) {
+      const match = plan.prices.find((p) => p.billingCycle === billingCycle);
+      if (match) return match;
+    }
+
+    // Fallback if no prices subdocument exists
+    const isYearly = billingCycle === "yearly";
+    const price = isYearly ? plan.price * 10 : plan.price;
+    const durationInDays = isYearly ? 365 : (plan.durationInDays || 30);
+
+    return {
+      billingCycle,
+      price,
+      currency: plan.currency || "INR",
+      durationInDays,
+    };
+  }
+
+  /**
+   * Helper: Expire all subscriptions that have passed their currentPeriodEnd / endDate
    */
   static async expireOverdueSubscriptions(userId?: string): Promise<void> {
     const filter: any = {
-      status: "ACTIVE",
-      endDate: { $lte: new Date() },
+      status: SubscriptionStatus.ACTIVE,
+      currentPeriodEnd: { $lte: new Date() },
+      isDeleted: { $ne: true },
     };
     if (userId) {
       filter.userId = new Types.ObjectId(userId);
     }
     await Subscription.updateMany(filter, {
-      $set: { status: "EXPIRED" },
+      $set: { status: SubscriptionStatus.EXPIRED },
     });
   }
 
@@ -34,17 +58,15 @@ export class MembershipService {
    */
   static async seedDefaultMemberships(): Promise<void> {
     try {
-      const seekerPlansCount = await MembershipRepository.findActiveMemberships(Role.JOB_SEEKER);
-      if (seekerPlansCount.length === 0) {
-        await MembershipRepository.insertDefaultMemberships(DEFAULT_MEMBERSHIP_PLANS);
-        console.log("✅ Default Job Seeker Membership plans seeded successfully.");
+      const allPlans = [...DEFAULT_MEMBERSHIP_PLANS, ...DEFAULT_RECRUITER_MEMBERSHIP_PLANS];
+      for (const defaultPlan of allPlans) {
+        await Membership.updateOne(
+          { name: defaultPlan.name, role: defaultPlan.role },
+          { $set: defaultPlan },
+          { upsert: true }
+        );
       }
-
-      const recruiterPlansCount = await MembershipRepository.findActiveMemberships(Role.RECRUITER);
-      if (recruiterPlansCount.length === 0) {
-        await MembershipRepository.insertDefaultMemberships(DEFAULT_RECRUITER_MEMBERSHIP_PLANS);
-        console.log("✅ Default Recruiter Membership plans seeded successfully.");
-      }
+      console.log("✅ Default Membership plans synced to USD ($0 Free, $5 Pro, $10 Premium) successfully.");
     } catch (error) {
       console.error("⚠️ Failed to seed default membership plans:", error);
     }
@@ -61,10 +83,15 @@ export class MembershipService {
   /**
    * Calculate Prorated Upgrade breakdown for user
    */
-  static async calculateProratedUpgrade(userId: string, userRole: Role, newMembershipId: string) {
+  static async calculateProratedUpgrade(
+    userId: string,
+    userRole: Role,
+    newMembershipId: string,
+    billingCycle: BillingCycle = "monthly"
+  ) {
     const newPlan = await MembershipRepository.findMembershipById(newMembershipId);
 
-    if (!newPlan || !newPlan.isActive) {
+    if (!newPlan || !newPlan.isActive || newPlan.isDeleted) {
       throw new ApiError(
         HTTP_STATUS.NOT_FOUND,
         MEMBERSHIP_MESSAGES.MEMBERSHIP_NOT_FOUND
@@ -80,6 +107,8 @@ export class MembershipService {
 
     await this.expireOverdueSubscriptions(userId);
 
+    const priceDetails = this.getPlanPriceDetails(newPlan, billingCycle);
+
     const currentSub = await MembershipRepository.findActiveSubscription(userId);
     const roleLevels = PLAN_LEVELS[userRole] || {};
     const newPlanLevel = roleLevels[newPlan.name] || 1;
@@ -89,9 +118,11 @@ export class MembershipService {
         isUpgrade: false,
         currentSub: null,
         newPlan,
+        billingCycle,
+        priceDetails,
         unusedCredit: 0,
-        finalUpgradePrice: newPlan.price,
-        currency: newPlan.currency || "INR",
+        finalUpgradePrice: priceDetails.price,
+        currency: priceDetails.currency,
       };
     }
 
@@ -99,10 +130,12 @@ export class MembershipService {
     const currentPlanLevel = roleLevels[currentPlanName] || 1;
 
     if (currentPlanLevel === newPlanLevel) {
-      throw new ApiError(
-        HTTP_STATUS.BAD_REQUEST,
-        MEMBERSHIP_MESSAGES.SAME_PLAN_ACTIVE
-      );
+      if (currentSub.billingCycle === billingCycle && !currentSub.cancelAtPeriodEnd) {
+        throw new ApiError(
+          HTTP_STATUS.BAD_REQUEST,
+          MEMBERSHIP_MESSAGES.SAME_PLAN_ACTIVE
+        );
+      }
     }
 
     if (currentPlanLevel > newPlanLevel) {
@@ -114,13 +147,15 @@ export class MembershipService {
 
     // Calculate remaining days & prorated credit
     const now = new Date();
-    const remainingMs = currentSub.endDate.getTime() - now.getTime();
+    const subEnd = currentSub.currentPeriodEnd || currentSub.endDate;
+    const remainingMs = subEnd.getTime() - now.getTime();
     const remainingDays = Math.max(0, Math.ceil(remainingMs / (1000 * 60 * 60 * 24)));
 
-    const oldDailyPrice = (currentSub.amount || 0) / 30;
+    const currentSubCycleDuration = currentSub.billingCycle === "yearly" ? 365 : 30;
+    const oldDailyPrice = (currentSub.amount || 0) / currentSubCycleDuration;
     const unusedCredit = Math.round(oldDailyPrice * remainingDays);
 
-    const rawUpgradePrice = newPlan.price - unusedCredit;
+    const rawUpgradePrice = priceDetails.price - unusedCredit;
     const finalUpgradePrice = Math.max(0, Math.round(rawUpgradePrice));
 
     return {
@@ -128,10 +163,12 @@ export class MembershipService {
       currentSub,
       currentPlanName,
       newPlan,
+      billingCycle,
+      priceDetails,
       remainingDays,
       unusedCredit,
       finalUpgradePrice,
-      currency: newPlan.currency || "INR",
+      currency: priceDetails.currency,
     };
   }
 
@@ -205,26 +242,39 @@ export class MembershipService {
   /**
    * Subscribe user (Job Seeker or Recruiter) to a membership plan (Free or direct)
    */
-  static async subscribe(userId: string, userRole: Role, membershipId: string) {
-    const upgradeCalc = await this.calculateProratedUpgrade(userId, userRole, membershipId);
+  static async subscribe(
+    userId: string,
+    userRole: Role,
+    membershipId: string,
+    billingCycle: BillingCycle = "monthly",
+    provider: PaymentProvider = PaymentProvider.MANUAL
+  ) {
+    const upgradeCalc = await this.calculateProratedUpgrade(userId, userRole, membershipId, billingCycle);
     const plan = upgradeCalc.newPlan;
+    const priceDetails = upgradeCalc.priceDetails;
+
+    // Strict Security Guard: Direct activation is strictly limited to Free tier plans (price === 0).
+    // Paid plans (price > 0) MUST be paid and verified via Polar or Razorpay checkout.
+    if (priceDetails.price > 0 && provider === PaymentProvider.MANUAL) {
+      throw new ApiError(
+        HTTP_STATUS.BAD_REQUEST,
+        "Paid membership plans cannot be activated directly. Please complete payment via Polar or Razorpay checkout."
+      );
+    }
 
     if (upgradeCalc.isUpgrade && upgradeCalc.currentSub) {
-      // Mark old active subscription as REPLACED upon upgrade
-      await Subscription.findByIdAndUpdate(upgradeCalc.currentSub._id, {
-        $set: {
-          status: "CANCELLED",
-          cancelledAt: new Date(),
-          cancelledReason: `Upgraded to ${plan.name}`,
-          autoRenew: false,
-        },
-      });
+      // Mark old active subscription as CANCELLED upon upgrade
+      await MembershipRepository.terminateSubscription(
+        upgradeCalc.currentSub._id.toString(),
+        `Upgraded to ${plan.name}`
+      );
     }
 
     const startDate = new Date();
-    const endDate = new Date(startDate.getTime() + plan.durationInDays * 24 * 60 * 60 * 1000);
+    const endDate = new Date(startDate.getTime() + priceDetails.durationInDays * 24 * 60 * 60 * 1000);
 
-    const isFreePlan = plan.price === 0;
+    const isFreePlan = priceDetails.price === 0;
+    const effectiveProvider = isFreePlan ? PaymentProvider.MANUAL : provider;
 
     const newSubscription = await MembershipRepository.createSubscription({
       userId: new Types.ObjectId(userId),
@@ -232,13 +282,15 @@ export class MembershipService {
       role: userRole,
       planName: plan.name,
       amount: upgradeCalc.finalUpgradePrice,
-      currency: plan.currency || "INR",
+      currency: priceDetails.currency,
+      billingCycle,
+      provider: effectiveProvider,
       startDate,
       endDate,
       currentPeriodStart: startDate,
       currentPeriodEnd: endDate,
-      status: "ACTIVE",
-      autoRenew: true,
+      status: SubscriptionStatus.ACTIVE,
+      cancelAtPeriodEnd: false,
     });
 
     await Payment.create({
@@ -246,9 +298,9 @@ export class MembershipService {
       membershipId: plan._id as Types.ObjectId,
       subscriptionId: newSubscription._id,
       amount: upgradeCalc.finalUpgradePrice,
-      currency: plan.currency || "INR",
+      currency: priceDetails.currency,
       status: "SUCCESS",
-      provider: isFreePlan ? "MANUAL" : "RAZORPAY",
+      provider: effectiveProvider,
       providerOrderId: `order_${newSubscription._id.toString()}_${Date.now()}`,
       paidAt: new Date(),
     }).catch(() => null);
@@ -273,7 +325,7 @@ export class MembershipService {
   }
 
   /**
-   * Cancel active subscription
+   * Cancel active subscription (disables AutoPay; stays active until paid period ends)
    */
   static async cancelSubscription(userId: string) {
     await this.expireOverdueSubscriptions(userId);
@@ -313,21 +365,22 @@ export class MembershipService {
       threeDaysFromNow.setDate(now.getDate() + 3);
 
       const expiringSubscriptions = await Subscription.find({
-        status: "ACTIVE",
-        endDate: { $gte: now, $lte: threeDaysFromNow },
+        status: SubscriptionStatus.ACTIVE,
+        currentPeriodEnd: { $gte: now, $lte: threeDaysFromNow },
+        isDeleted: { $ne: true },
       }).populate("userId", "email role");
 
       for (const sub of expiringSubscriptions) {
         const user = sub.userId as any;
         if (user && user.email) {
-          const diffMs = new Date(sub.endDate).getTime() - now.getTime();
+          const diffMs = new Date(sub.currentPeriodEnd || sub.endDate).getTime() - now.getTime();
           const daysRemaining = Math.max(1, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
 
           EmailService.sendSubscriptionRenewalReminder({
             email: user.email,
             name: user.email.split("@")[0],
             planName: sub.planName,
-            expiryDate: sub.endDate,
+            expiryDate: sub.currentPeriodEnd || sub.endDate,
             daysRemaining,
           }).catch((err) => console.error(`[MembershipService] Failed to send renewal email to ${user.email}:`, err));
         }

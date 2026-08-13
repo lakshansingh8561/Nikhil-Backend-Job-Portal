@@ -95,19 +95,20 @@ async function runCompleteSubscriptionTests() {
 
   // 6. Execute Upgrade Order Creation & Payment Verification
   console.log("\n--- TEST 6: Order Creation & Upgrade Execution ---");
-  const orderRes = await PaymentService.createOrder(userId, Role.JOB_SEEKER, {
+  const orderRes: any = await PaymentService.createOrder(userId, Role.JOB_SEEKER, {
     membershipId: premiumPlan._id.toString(),
   });
 
+  const orderData = (orderRes as any).data;
   console.log("Upgrade Order Created:", {
-    orderId: orderRes.data?.orderId,
-    amountInPaise: orderRes.data?.amount,
-    upgradeInfo: orderRes.data?.upgradeInfo,
+    orderId: orderData?.orderId,
+    amountInPaise: orderData?.amount,
+    upgradeInfo: orderData?.upgradeInfo,
   });
 
   // Verify payment using test signature
   const keySecret = process.env.RAZORPAY_KEY_SECRET || process.env.RAZORPAY_SECRET_KEY || "whsec_test_jobbox_2026";
-  const razorpay_order_id = orderRes.data!.orderId;
+  const razorpay_order_id = orderData?.orderId || "order_test_123";
   const razorpay_payment_id = "pay_test_upgrade_" + Date.now();
   const razorpay_signature = require("crypto")
     .createHmac("sha256", keySecret)

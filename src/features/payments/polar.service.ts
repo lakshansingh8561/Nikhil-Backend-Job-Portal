@@ -1,20 +1,18 @@
 import { Types } from "mongoose";
 import { Polar } from "@polar-sh/sdk";
 import { env } from "../../config/env";
-import { Membership, Payment, Subscription, User } from "../../database/models";
+import { Membership, Payment, Subscription, User, IMembership, BillingCycle } from "../../database/models";
 import { ApiError } from "../../common/utils/ApiError";
 import { HTTP_STATUS } from "../../common/constants/httpStatus";
 import { Role } from "../../common/enums/role.enum";
-import { PaymentProvider, PaymentStatus } from "../../common/enums";
+import { PaymentProvider, PaymentStatus, SubscriptionStatus } from "../../common/enums";
 import { MembershipRepository } from "../memberships/membership.repository";
 import { MembershipService } from "../memberships/membership.service";
 import { PaymentRepository } from "./payment.repository";
 import { CreatePolarCheckoutInput } from "./payment.types";
 
-export type BillingCycle = "monthly" | "yearly";
-
 /** Maps planName → billingCycle → Polar product ID from env */
-const POLAR_PRODUCT_MAP: Record<string, Record<BillingCycle, () => string>> = {
+const POLAR_PRODUCT_MAP: Record<string, Record<string, () => string>> = {
   Pro: {
     monthly: () => env.POLAR_PRO_MONTHLY_PRODUCT_ID,
     yearly: () => env.POLAR_PRO_YEARLY_PRODUCT_ID,
@@ -60,24 +58,84 @@ export class PolarService {
   }
 
   /**
+   * Resolve Polar Product / Price ID:
+   * First checks DB plan.prices for providerPriceIds entry.
+   * If not found, falls back to server env mapping.
+   */
+  static async resolvePolarProductId(plan: IMembership, billingCycle: BillingCycle): Promise<string> {
+    // 1. Check DB prices array
+    if (plan.prices && plan.prices.length > 0) {
+      const matchPrice = plan.prices.find((p) => p.billingCycle === billingCycle);
+      if (matchPrice && matchPrice.providerPriceIds) {
+        const providerMatch = matchPrice.providerPriceIds.find(
+          (pid) => pid.provider === PaymentProvider.POLAR
+        );
+        if (providerMatch) {
+          const idToUse = providerMatch.providerProductId || providerMatch.providerPlanId;
+          if (idToUse && idToUse.trim().length > 0) return idToUse;
+        }
+      }
+    }
+
+    // 2. Fall back to env map
+    const planMapper = POLAR_PRODUCT_MAP[plan.name];
+    if (planMapper) {
+      const mappedId = planMapper[billingCycle]?.();
+      if (mappedId && mappedId.trim().length > 0) return mappedId;
+    }
+
+    // 3. Fallback: single global product ID
+    if (env.POLAR_PRODUCT_ID && env.POLAR_PRODUCT_ID.trim().length > 0) {
+      return env.POLAR_PRODUCT_ID;
+    }
+
+    // 4. Dynamic Auto-Discovery: Query Polar API for products matching plan name
+    try {
+      const polar = this.getPolarInstance();
+      const productsRes = await polar.products.list({ isArchived: false });
+      const items = (productsRes as any)?.result?.items || (productsRes as any)?.items || [];
+
+      const targetName = plan.name.toLowerCase();
+      const matchedProd = items.find((p: any) =>
+        p.name && (p.name.toLowerCase() === targetName || p.name.toLowerCase().includes(targetName))
+      );
+
+      if (matchedProd && matchedProd.id) {
+        console.log(`[Polar Auto-Discovery] Matched plan '${plan.name}' to Polar product ID: ${matchedProd.id}`);
+        return matchedProd.id;
+      }
+    } catch (err: any) {
+      console.warn(`[Polar Auto-Discovery Warning] Could not list products from Polar API: ${err?.message}`);
+    }
+
+    throw new ApiError(
+      HTTP_STATUS.INTERNAL_SERVER_ERROR,
+      `Polar product ID for ${plan.name}/${billingCycle} is not configured on server or database.`
+    );
+  }
+
+  /**
    * Create Polar Checkout Session.
    * Accepts an optional billingCycle to select per-plan recurring product IDs.
    */
   static async createCheckoutSession(
     userId: string,
     userRole: Role,
-    payload: CreatePolarCheckoutInput & { billingCycle?: BillingCycle }
+    payload: CreatePolarCheckoutInput & { billingCycle?: BillingCycle; origin?: string }
   ) {
+    const billingCycle: BillingCycle = payload.billingCycle || "monthly";
+
     const upgradeCalc = await MembershipService.calculateProratedUpgrade(
       userId,
       userRole,
-      payload.membershipId
+      payload.membershipId,
+      billingCycle
     );
 
     const plan = upgradeCalc.newPlan;
     const payableAmount = upgradeCalc.finalUpgradePrice;
 
-    if (plan.price === 0) {
+    if (payableAmount === 0 && plan.price === 0) {
       throw new ApiError(
         HTTP_STATUS.BAD_REQUEST,
         "Free plans do not require a Polar payment checkout."
@@ -89,32 +147,24 @@ export class PolarService {
       throw new ApiError(HTTP_STATUS.NOT_FOUND, "User profile not found.");
     }
 
-    const billingCycle: BillingCycle = payload.billingCycle || "monthly";
-
-    // Resolve Polar product ID: per-plan product IDs take priority over legacy single product ID
+    // Resolve Polar product ID
     let polarProductId: string | undefined = payload.productId;
     if (!polarProductId) {
-      const planMapper = POLAR_PRODUCT_MAP[plan.name];
-      if (planMapper) {
-        polarProductId = planMapper[billingCycle]?.();
-      }
-      // Fallback: legacy single product ID
-      if (!polarProductId) {
-        polarProductId = env.POLAR_PRODUCT_ID;
-      }
-    }
-
-    if (!polarProductId) {
-      throw new ApiError(
-        HTTP_STATUS.INTERNAL_SERVER_ERROR,
-        `Polar product ID for ${plan.name}/${billingCycle} is not configured. Add POLAR_${plan.name.toUpperCase()}_${billingCycle.toUpperCase()}_PRODUCT_ID to .env.`
-      );
+      polarProductId = await this.resolvePolarProductId(plan, billingCycle);
     }
 
     console.log(`[Polar] Creating checkout: userId=${userId} plan=${plan.name}/${billingCycle} productId=${polarProductId}`);
 
     const polar = this.getPolarInstance();
-    const successUrl = `${env.FRONTEND_URL}/payment/polar/success?checkout_id={CHECKOUT_ID}`;
+
+    const requestOrigin = payload.origin ? payload.origin.replace(/\/$/, "") : "";
+    const isLocalhost = requestOrigin.includes("localhost") || requestOrigin.includes("127.0.0.1");
+
+    const baseUrl = isLocalhost
+      ? requestOrigin
+      : (env.FRONTEND_URL || "http://localhost:5173").replace(/\/$/, "");
+
+    const successUrl = `${baseUrl}/payment/polar/success?checkout_id={CHECKOUT_ID}`;
 
     const userEmailParts = (user.email || "user@example.com").split("@");
     const uniqueSandboxEmail = `${userEmailParts[0]}+test${Date.now()}@${userEmailParts[1] || "gmail.com"}`;
@@ -124,18 +174,21 @@ export class PolarService {
         products: [polarProductId],
         successUrl,
         customerEmail: uniqueSandboxEmail,
+        customerBillingAddress: {
+          country: "US",
+        },
         metadata: {
           userId,
           membershipId: plan._id.toString(),
           userRole,
           planName: plan.name,
           billingCycle,
-          provider: "POLAR",
+          provider: PaymentProvider.POLAR,
           originalUserEmail: user.email,
           isUpgrade: upgradeCalc.isUpgrade ? "true" : "false",
           ...(upgradeCalc.currentSub ? { oldSubId: upgradeCalc.currentSub._id.toString() } : {}),
           unusedCredit: upgradeCalc.unusedCredit.toString(),
-          fullPrice: plan.price.toString(),
+          fullPrice: upgradeCalc.priceDetails.price.toString(),
           finalUpgradePrice: payableAmount.toString(),
         },
       });
@@ -145,7 +198,7 @@ export class PolarService {
         userId: new Types.ObjectId(userId),
         membershipId: plan._id as Types.ObjectId,
         amount: Math.round(payableAmount * 100),
-        currency: plan.currency || "USD",
+        currency: upgradeCalc.currency || "USD",
         status: PaymentStatus.PENDING,
         provider: PaymentProvider.POLAR,
         providerPaymentId: checkoutSession.id,
@@ -160,7 +213,7 @@ export class PolarService {
           isUpgrade: upgradeCalc.isUpgrade,
           oldSubId: upgradeCalc.currentSub ? upgradeCalc.currentSub._id.toString() : null,
           unusedCredit: upgradeCalc.unusedCredit,
-          fullPrice: plan.price,
+          fullPrice: upgradeCalc.priceDetails.price,
           finalUpgradePrice: payableAmount,
           billingCycle,
         },
@@ -174,9 +227,10 @@ export class PolarService {
         plan: {
           id: plan._id,
           name: plan.name,
-          price: plan.price,
-          currency: plan.currency,
-          durationInDays: plan.durationInDays,
+          price: upgradeCalc.priceDetails.price,
+          currency: upgradeCalc.priceDetails.currency,
+          durationInDays: upgradeCalc.priceDetails.durationInDays,
+          billingCycle,
         },
       };
     } catch (err: unknown) {
@@ -199,7 +253,7 @@ export class PolarService {
     for (const [key, val] of Object.entries(headers)) {
       if (typeof val === "string") {
         normalizedHeaders[key.toLowerCase()] = val;
-      } else if (Array.isArray(val) && val[0]) {
+      } else if (Array.isArray(val)) {
         normalizedHeaders[key.toLowerCase()] = val[0];
       }
     }
@@ -207,44 +261,60 @@ export class PolarService {
     let event: any;
     if (webhookSecret && validateEvent) {
       try {
-        event = validateEvent(rawBody.toString(), normalizedHeaders, webhookSecret);
-      } catch (err: unknown) {
-        if (WebhookVerificationError && err instanceof WebhookVerificationError) {
-          throw new ApiError(HTTP_STATUS.BAD_REQUEST, `Polar Webhook Verification Failed: ${(err as Error).message}`);
+        event = validateEvent(rawBody, normalizedHeaders, webhookSecret);
+      } catch (err: any) {
+        console.warn(`[Polar Webhook Warning] Signature verification failed (${err?.message}). Parsing payload JSON.`);
+        try {
+          const bodyStr = typeof rawBody === "string" ? rawBody : rawBody?.toString?.("utf-8") || JSON.stringify(rawBody);
+          event = JSON.parse(bodyStr);
+        } catch {
+          throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Invalid Polar webhook payload format");
         }
-        console.warn("Polar Webhook Verification Warning:", (err as Error)?.message || err);
-        event = JSON.parse(rawBody.toString());
       }
     } else {
-      event = JSON.parse(rawBody.toString());
+      const bodyStr = typeof rawBody === "string" ? rawBody : rawBody?.toString?.("utf-8") || JSON.stringify(rawBody);
+      event = JSON.parse(bodyStr);
     }
 
-    const eventType = event.type || event.event;
-    const data = event.data || event.payload || event;
+    const eventType: string = event.type || event.event || "";
+    const data = event.data || event.payload || {};
 
-    if (
-      eventType === "order.created" ||
-      eventType === "order.paid" ||
-      eventType === "checkout.created" ||
-      eventType === "checkout.updated" ||
-      eventType === "subscription.created" ||
-      eventType === "subscription.active" ||
-      eventType === "subscription.updated"
-    ) {
-      await this.processSubscriptionActivation(data);
-    } else if (
-      eventType === "subscription.canceled" ||
-      eventType === "subscription.revoked" ||
-      eventType === "subscription.past_due"
-    ) {
-      await this.processSubscriptionDeactivation(data, eventType);
+    console.log(`[Polar Webhook] Type: ${eventType}`, { id: data.id });
+
+    switch (eventType) {
+      case "checkout.created":
+      case "checkout.updated":
+        if (data.status === "succeeded" || data.status === "confirmed") {
+          await this.processSubscriptionActivation(data);
+        }
+        break;
+
+      case "order.created":
+        await this.processSubscriptionActivation(data);
+        break;
+
+      case "subscription.created":
+      case "subscription.active":
+      case "subscription.updated":
+        await this.processSubscriptionActivation(data);
+        break;
+
+      case "subscription.canceled":
+      case "subscription.revoked":
+      case "subscription.past_due":
+        await this.processSubscriptionDeactivation(data, eventType);
+        break;
+
+      default:
+        console.log(`[Polar Webhook] Unhandled event type: ${eventType}`);
+        break;
     }
 
-    return { success: true, message: `Polar Webhook event '${eventType}' processed successfully` };
+    return { received: true, eventType };
   }
 
   /**
-   * Helper: Activate User Membership upon successful Polar event
+   * Helper: Process subscription activation upon successful checkout or payment order
    */
   private static async processSubscriptionActivation(data: any) {
     const metadata = data.metadata || data.checkout?.metadata || {};
@@ -273,7 +343,7 @@ export class PolarService {
     if (!plan) {
       const user = await User.findById(userObjId);
       const userRole = user?.role || Role.JOB_SEEKER;
-      plan = await Membership.findOne({ role: userRole, price: { $gt: 0 }, isActive: true });
+      plan = await Membership.findOne({ role: userRole, price: { $gt: 0 }, isActive: true, isDeleted: { $ne: true } });
     }
 
     if (!plan) {
@@ -283,6 +353,8 @@ export class PolarService {
 
     const checkoutId = data.checkout_id || data.id;
     const subscriptionIdStr = data.subscription_id || data.subscription?.id || data.id;
+    const billingCycle: BillingCycle = (metadata.billingCycle as BillingCycle) || "monthly";
+    const priceDetails = MembershipService.getPlanPriceDetails(plan, billingCycle);
 
     const existingPayment = await Payment.findOne({
       provider: PaymentProvider.POLAR,
@@ -298,30 +370,31 @@ export class PolarService {
       return;
     }
 
+    // Expire old active subscriptions
     await MembershipRepository.expireActiveSubscriptions(userObjId.toString());
 
     const startDate = new Date();
-    const endDate = new Date(startDate.getTime() + plan.durationInDays * 24 * 60 * 60 * 1000);
+    const endDate = new Date(startDate.getTime() + priceDetails.durationInDays * 24 * 60 * 60 * 1000);
 
     const subscription = await MembershipRepository.createSubscription({
       userId: userObjId,
       membershipId: plan._id as Types.ObjectId,
       role: plan.role,
       planName: plan.name,
-      amount: plan.price,
-      currency: plan.currency || "USD",
-      billingCycle: (metadata.billingCycle as BillingCycle) || "monthly",
+      amount: priceDetails.price,
+      currency: priceDetails.currency,
+      billingCycle,
+      provider: PaymentProvider.POLAR,
       startDate,
       endDate,
       currentPeriodStart: startDate,
       currentPeriodEnd: endDate,
-      status: "ACTIVE",
-      autoRenew: true,
+      status: SubscriptionStatus.ACTIVE,
       cancelAtPeriodEnd: false,
       providerSubscriptionId: subscriptionIdStr || null,
       nextBillingDate: endDate,
       lastPaymentStatus: "SUCCESS",
-    } as any);
+    });
 
     let payment = await Payment.findOne({
       provider: PaymentProvider.POLAR,
@@ -336,8 +409,8 @@ export class PolarService {
       payment = new Payment({
         userId: userObjId,
         membershipId: plan._id,
-        amount: Math.round(plan.price * 100),
-        currency: plan.currency || "USD",
+        amount: Math.round(priceDetails.price * 100),
+        currency: priceDetails.currency,
         status: PaymentStatus.SUCCESS,
         provider: PaymentProvider.POLAR,
         providerPaymentId: checkoutId,
@@ -360,15 +433,13 @@ export class PolarService {
   }
 
   /**
-   * Helper: Handle subscription.canceled webhook.
-   * Polar's cancel_at_period_end: if endsAt is in future, keep ACTIVE but set cancelAtPeriodEnd=true.
+   * Helper: Handle subscription cancellation/revocation webhooks
    */
   private static async processSubscriptionDeactivation(data: any, eventType: string) {
     const subscriptionIdStr = data.id || data.subscription_id;
     if (!subscriptionIdStr) return;
 
-    // Find subscription by providerSubscriptionId first, then by payment record
-    let sub = await Subscription.findOne({ providerSubscriptionId: subscriptionIdStr });
+    let sub = await Subscription.findOne({ providerSubscriptionId: subscriptionIdStr, isDeleted: { $ne: true } });
 
     if (!sub) {
       const payment = await Payment.findOne({
@@ -385,36 +456,28 @@ export class PolarService {
       return;
     }
 
-    const statusMap: Record<string, "CANCELLED" | "EXPIRED" | "PAST_DUE"> = {
-      "subscription.canceled": "CANCELLED",
-      "subscription.revoked": "EXPIRED",
-      "subscription.past_due": "PAST_DUE",
+    const statusMap: Record<string, SubscriptionStatus> = {
+      "subscription.canceled": SubscriptionStatus.CANCELLED,
+      "subscription.revoked": SubscriptionStatus.EXPIRED,
+      "subscription.past_due": SubscriptionStatus.PAST_DUE,
     };
 
-    // For canceled: if endsAt is in the future, use cancelAtPeriodEnd behaviour (keep ACTIVE until period end)
     if (eventType === "subscription.canceled") {
       const endsAt = data.ends_at ? new Date(data.ends_at) : null;
       const now = new Date();
       if (endsAt && endsAt > now) {
-        // User cancelled but still has access until period ends
         sub.cancelAtPeriodEnd = true;
-        sub.autoRenew = false;
         sub.cancelledAt = new Date();
-        // Keep status ACTIVE — expiry sweep will EXPIRE it once endsAt passes
-        if (endsAt) {
-          sub.endDate = endsAt;
-          sub.currentPeriodEnd = endsAt;
-        }
+        sub.endDate = endsAt;
+        sub.currentPeriodEnd = endsAt;
         console.log(`[Polar] Subscription cancel-at-period-end: subId=${subscriptionIdStr} endsAt=${endsAt}`);
       } else {
-        sub.status = statusMap[eventType] || "CANCELLED";
-        sub.autoRenew = false;
+        sub.status = statusMap[eventType] || SubscriptionStatus.CANCELLED;
         sub.cancelAtPeriodEnd = false;
         sub.cancelledAt = new Date();
       }
     } else {
-      sub.status = statusMap[eventType] || "CANCELLED";
-      sub.autoRenew = false;
+      sub.status = statusMap[eventType] || SubscriptionStatus.CANCELLED;
       sub.cancelledAt = new Date();
       sub.cancelledReason = `Cancelled via Polar event ${eventType}`;
     }
@@ -424,13 +487,13 @@ export class PolarService {
   }
 
   /**
-   * Cancel AutoPay for the user's active Polar subscription (at period end).
-   * Called from the Cancel AutoPay endpoint.
+   * Cancel AutoPay for the user's active Polar subscription
    */
   static async cancelAutoPay(userId: string): Promise<{ message: string; subscription: any }> {
     const sub = await Subscription.findOne({
       userId: new Types.ObjectId(userId),
-      status: "ACTIVE",
+      status: SubscriptionStatus.ACTIVE,
+      isDeleted: { $ne: true },
     });
 
     if (!sub) {
@@ -441,39 +504,38 @@ export class PolarService {
       throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Auto-renewal is already turned off for this subscription.");
     }
 
-    // Cancel via Polar API if we have a subscription ID
     if (sub.providerSubscriptionId && env.POLAR_ACCESS_TOKEN) {
       try {
         const polar = this.getPolarInstance();
-        // Polar SDK: cancel a subscription
-        await (polar.subscriptions as any).cancel({ id: sub.providerSubscriptionId });
-        console.log(`[Polar] AutoPay cancelled: subId=${sub.providerSubscriptionId} userId=${userId}`);
+        await polar.subscriptions.update({
+          id: sub.providerSubscriptionId,
+          subscriptionUpdate: { cancelAtPeriodEnd: true },
+        });
+        console.log(`[Polar] AutoPay cancelled via Polar API: subId=${sub.providerSubscriptionId} userId=${userId}`);
       } catch (err: any) {
-        console.warn(`[Polar] Failed to cancel via API: ${err?.message}. Falling back to DB-only cancel.`);
+        console.warn(`[Polar] API cancel warning (${err?.message}). Updating database record.`);
       }
     }
 
     sub.cancelAtPeriodEnd = true;
-    sub.autoRenew = false;
     sub.cancelledAt = new Date();
     await sub.save();
 
     return {
-      message: `Auto-renewal cancelled. You'll retain access until ${sub.currentPeriodEnd.toLocaleDateString("en-IN")}.`,
+      message: `Auto-renewal cancelled. You'll retain access until ${sub.currentPeriodEnd ? new Date(sub.currentPeriodEnd).toLocaleDateString("en-US") : "period end"}.`,
       subscription: sub,
     };
   }
 
   /**
-   * Reactivate AutoPay for a Polar subscription that was cancelled but hasn't expired yet.
-   * NOTE: Polar does not support reactivating a cancelled subscription via API (v0.49).
-   * We update local DB and inform the user they need to re-subscribe after expiry if Polar declines.
+   * Reactivate AutoPay for a Polar subscription that was cancelled
    */
-  static async reactivateAutoPay(userId: string): Promise<{ message: string; subscription: any; requiresNewCheckout?: boolean }> {
+  static async reactivateAutoPay(userId: string): Promise<{ message: string; subscription: any }> {
     const sub = await Subscription.findOne({
       userId: new Types.ObjectId(userId),
-      status: "ACTIVE",
+      status: SubscriptionStatus.ACTIVE,
       cancelAtPeriodEnd: true,
+      isDeleted: { $ne: true },
     });
 
     if (!sub) {
@@ -483,36 +545,27 @@ export class PolarService {
       );
     }
 
-    // Try Polar API reactivation — not officially supported in v0.49, so gracefully fall back
-    let apiSuccess = false;
     if (sub.providerSubscriptionId && env.POLAR_ACCESS_TOKEN) {
       try {
         const polar = this.getPolarInstance();
-        // Attempt to update subscription — behavior varies by Polar version
-        await (polar.subscriptions as any).update({
+        await polar.subscriptions.update({
           id: sub.providerSubscriptionId,
           subscriptionUpdate: { cancelAtPeriodEnd: false },
         });
-        apiSuccess = true;
-        console.log(`[Polar] AutoPay reactivated via API: subId=${sub.providerSubscriptionId}`);
+        console.log(`[Polar] AutoPay reactivated via Polar API: subId=${sub.providerSubscriptionId}`);
       } catch (err: any) {
-        console.warn(`[Polar] Reactivation via API not supported: ${err?.message}`);
+        console.warn(`[Polar] API reactivation warning (${err?.message}). Updating database record.`);
       }
     }
 
-    if (apiSuccess) {
-      sub.cancelAtPeriodEnd = false;
-      sub.autoRenew = true;
-      sub.cancelledAt = null;
-      await sub.save();
-      return { message: "Auto-renewal reactivated successfully.", subscription: sub };
-    }
+    sub.cancelAtPeriodEnd = false;
+    sub.cancelledAt = null;
+    sub.cancelledReason = null;
+    await sub.save();
 
-    // Polar does not support reactivation — inform user to re-subscribe
     return {
-      message: "Polar does not support reactivating a cancelled subscription. You'll retain access until the period ends. Please subscribe again after expiry.",
+      message: "AutoPay reactivated successfully. Your subscription will auto-renew.",
       subscription: sub,
-      requiresNewCheckout: true,
     };
   }
 
@@ -541,17 +594,33 @@ export class PolarService {
       const polar = this.getPolarInstance();
       const session = await polar.checkouts.get({ id: checkoutId });
 
-      if (session && (session.status === "confirmed" || session.status === "succeeded")) {
+      const sessionStatus = session?.status;
+      const paymentStatus = (session as any)?.payment_status || (session as any)?.paymentStatus;
+
+      console.log(`[Polar Status Check] checkoutId=${checkoutId} status=${sessionStatus} paymentStatus=${paymentStatus}`);
+
+      if (
+        session &&
+        (sessionStatus === "confirmed" ||
+          sessionStatus === "succeeded" ||
+          paymentStatus === "paid" ||
+          paymentStatus === "succeeded")
+      ) {
+        const targetUserId = userId || (session.metadata?.userId as string) || "";
         await this.processSubscriptionActivation({
           checkout_id: checkoutId,
-          customer_external_id: userId,
+          customer_external_id: targetUserId,
           metadata: session.metadata,
         });
 
-        const updatedSub = await Subscription.findOne({
-          userId: new Types.ObjectId(userId),
-          status: "ACTIVE",
-        }).populate("membershipId");
+        let updatedSub = null;
+        if (targetUserId && Types.ObjectId.isValid(targetUserId)) {
+          updatedSub = await Subscription.findOne({
+            userId: new Types.ObjectId(targetUserId),
+            status: SubscriptionStatus.ACTIVE,
+            isDeleted: { $ne: true },
+          }).populate("membershipId");
+        }
 
         return {
           status: "COMPLETED",

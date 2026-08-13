@@ -1,5 +1,7 @@
 import { Schema, model } from "mongoose";
 import { ISubscription } from "./subscription.interface";
+import { PaymentProvider } from "../../../common/enums/paymentProvider.enum";
+import { SubscriptionStatus } from "../../../common/enums/subscriptionStatus.enum";
 
 const subscriptionSchema = new Schema<ISubscription>(
   {
@@ -44,6 +46,13 @@ const subscriptionSchema = new Schema<ISubscription>(
       default: "monthly",
       index: true,
     },
+    provider: {
+      type: String,
+      enum: Object.values(PaymentProvider),
+      required: true,
+      default: PaymentProvider.RAZORPAY,
+      index: true,
+    },
     startDate: {
       type: Date,
       required: true,
@@ -64,20 +73,15 @@ const subscriptionSchema = new Schema<ISubscription>(
     },
     status: {
       type: String,
-      enum: ["PENDING", "ACTIVE", "EXPIRED", "CANCELLED", "PAST_DUE"],
-      default: "PENDING",
+      enum: Object.values(SubscriptionStatus),
+      default: SubscriptionStatus.PENDING,
       index: true,
-    },
-    autoRenew: {
-      type: Boolean,
-      default: false,
     },
     // Recurring / AutoPay fields
     providerSubscriptionId: {
       type: String,
       default: null,
       trim: true,
-      index: true,
     },
     providerCustomerId: {
       type: String,
@@ -122,10 +126,23 @@ const subscriptionSchema = new Schema<ISubscription>(
   }
 );
 
-subscriptionSchema.index({
-  userId: 1,
-  status: 1,
-});
+// Prevent duplicate active subscriptions per user at database level
+subscriptionSchema.index(
+  { userId: 1, status: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { status: "ACTIVE", isDeleted: false },
+  }
+);
+
+// Prevent duplicate provider subscription mappings
+subscriptionSchema.index(
+  { provider: 1, providerSubscriptionId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { providerSubscriptionId: { $type: "string" } },
+  }
+);
 
 subscriptionSchema.index({
   endDate: 1,

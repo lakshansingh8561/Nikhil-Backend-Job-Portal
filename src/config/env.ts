@@ -33,12 +33,12 @@ export const env = {
   /** Legacy single-product ID kept for backward compat */
   POLAR_PRODUCT_ID: process.env.POLAR_PRODUCT_ID,
   POLAR_SERVER: (process.env.POLAR_SERVER as "sandbox" | "production") || "sandbox",
-  POLAR_WEBHOOK_SECRET: process.env.POLAR_WEBHOOK_SECRET || "",
+  POLAR_WEBHOOK_SECRET: (process.env.POLAR_WEBHOOK_SECRET || "").trim(),
   /** Recurring product IDs — create these in Polar dashboard */
-  POLAR_PRO_MONTHLY_PRODUCT_ID: process.env.POLAR_PRO_MONTHLY_PRODUCT_ID || "",
-  POLAR_PRO_YEARLY_PRODUCT_ID: process.env.POLAR_PRO_YEARLY_PRODUCT_ID || "",
-  POLAR_PREMIUM_MONTHLY_PRODUCT_ID: process.env.POLAR_PREMIUM_MONTHLY_PRODUCT_ID || "",
-  POLAR_PREMIUM_YEARLY_PRODUCT_ID: process.env.POLAR_PREMIUM_YEARLY_PRODUCT_ID || "",
+  POLAR_PRO_MONTHLY_PRODUCT_ID: process.env.POLAR_PRO_MONTHLY_PRODUCT_ID || process.env.POLAR_PRO_PRODUCT_ID || "",
+  POLAR_PRO_YEARLY_PRODUCT_ID: process.env.POLAR_PRO_YEARLY_PRODUCT_ID || process.env.POLAR_PRO_PRODUCT_ID || "",
+  POLAR_PREMIUM_MONTHLY_PRODUCT_ID: process.env.POLAR_PREMIUM_MONTHLY_PRODUCT_ID || process.env.POLAR_PREMIUM_PRODUCT_ID || "",
+  POLAR_PREMIUM_YEARLY_PRODUCT_ID: process.env.POLAR_PREMIUM_YEARLY_PRODUCT_ID || process.env.POLAR_PREMIUM_PRODUCT_ID || "",
 
   // ── Razorpay ──────────────────────────────────────────────────────────────
   RAZORPAY_KEY_ID: process.env.RAZORPAY_KEY_ID || process.env.RAZORPAY_TEST_KEY || "",

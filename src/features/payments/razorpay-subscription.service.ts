@@ -14,21 +14,29 @@ import { Types } from "mongoose";
 import { env } from "../../config/env";
 import { ApiError } from "../../common/utils/ApiError";
 import { HTTP_STATUS } from "../../common/constants/httpStatus";
-import { PaymentProvider, PaymentStatus } from "../../common/enums";
-import { Membership, Payment, Subscription } from "../../database/models";
+import { PaymentProvider, PaymentStatus, SubscriptionStatus } from "../../common/enums";
+import { Membership, Payment, Subscription, BillingCycle, IMembership } from "../../database/models";
 import { MembershipRepository } from "../memberships/membership.repository";
+import { MembershipService } from "../memberships/membership.service";
 import { PaymentRepository } from "./payment.repository";
 
-export type BillingCycle = "monthly" | "yearly";
-export type PlanKey = "pro" | "premium";
+export type PlanKey = "pro" | "premium" | "professional" | "enterprise";
 
 /** Maps plan + billingCycle → Razorpay Plan ID from env */
-const RAZORPAY_PLAN_MAP: Record<PlanKey, Record<BillingCycle, () => string>> = {
+const RAZORPAY_PLAN_MAP: Record<string, Record<string, () => string>> = {
   pro: {
     monthly: () => env.RAZORPAY_PRO_MONTHLY_PLAN_ID,
     yearly: () => env.RAZORPAY_PRO_YEARLY_PLAN_ID,
   },
   premium: {
+    monthly: () => env.RAZORPAY_PREMIUM_MONTHLY_PLAN_ID,
+    yearly: () => env.RAZORPAY_PREMIUM_YEARLY_PLAN_ID,
+  },
+  professional: {
+    monthly: () => env.RAZORPAY_PRO_MONTHLY_PLAN_ID,
+    yearly: () => env.RAZORPAY_PRO_YEARLY_PLAN_ID,
+  },
+  enterprise: {
     monthly: () => env.RAZORPAY_PREMIUM_MONTHLY_PLAN_ID,
     yearly: () => env.RAZORPAY_PREMIUM_YEARLY_PLAN_ID,
   },
@@ -48,57 +56,72 @@ export class RazorpaySubscriptionService {
     });
   }
 
-  /** Resolve the server-side Razorpay Plan ID for a given plan key + billing cycle */
-  static resolvePlanId(planKey: PlanKey, billingCycle: BillingCycle): string {
+  /**
+   * Resolve Razorpay Plan ID:
+   * First checks DB plan.prices for providerPriceIds entry.
+   * If not found, falls back to server env mapping.
+   */
+  static resolveRazorpayPlanId(plan: IMembership, billingCycle: BillingCycle): string {
+    // 1. Check DB prices array
+    if (plan.prices && plan.prices.length > 0) {
+      const matchPrice = plan.prices.find((p) => p.billingCycle === billingCycle);
+      if (matchPrice && matchPrice.providerPriceIds) {
+        const providerMatch = matchPrice.providerPriceIds.find(
+          (pid) => pid.provider === PaymentProvider.RAZORPAY
+        );
+        if (providerMatch && providerMatch.providerPlanId) {
+          return providerMatch.providerPlanId;
+        }
+      }
+    }
+
+    // 2. Fall back to env map by plan name (lowercase)
+    const planKey = (plan.name || "").toLowerCase();
     const resolver = RAZORPAY_PLAN_MAP[planKey]?.[billingCycle];
-    if (!resolver) {
-      throw new ApiError(HTTP_STATUS.BAD_REQUEST, `Unsupported plan or billing cycle: ${planKey}/${billingCycle}`);
+    if (resolver) {
+      const envPlanId = resolver();
+      if (envPlanId) return envPlanId;
     }
-    const planId = resolver();
-    if (!planId) {
-      throw new ApiError(
-        HTTP_STATUS.INTERNAL_SERVER_ERROR,
-        `Razorpay plan ID for ${planKey}/${billingCycle} is not configured. Add it to .env.`
-      );
-    }
-    return planId;
+
+    throw new ApiError(
+      HTTP_STATUS.INTERNAL_SERVER_ERROR,
+      `Razorpay plan ID for ${plan.name}/${billingCycle} is not configured on server or database.`
+    );
   }
 
   /**
    * Create a Razorpay recurring subscription.
-   *
-   * Returns the Razorpay subscription ID + checkout details for the frontend
-   * to open the Razorpay checkout modal in subscription mode.
    */
   static async createSubscription(
     userId: string,
     userRole: string,
     membershipId: string,
-    planKey: PlanKey,
+    planKey: string,
     billingCycle: BillingCycle
   ) {
     const plan = await Membership.findById(membershipId);
-    if (!plan || !plan.isActive) {
+    if (!plan || !plan.isActive || plan.isDeleted) {
       throw new ApiError(HTTP_STATUS.NOT_FOUND, "Membership plan not found or inactive.");
     }
 
-    if (plan.price === 0) {
+    const priceDetails = MembershipService.getPlanPriceDetails(plan, billingCycle);
+
+    if (priceDetails.price === 0) {
       throw new ApiError(
         HTTP_STATUS.BAD_REQUEST,
-        "Free plans do not require Razorpay subscription. Use the direct subscribe endpoint."
+        "Free plans do not require Razorpay subscription. Use direct subscribe."
       );
     }
 
-    const razorpayPlanId = this.resolvePlanId(planKey, billingCycle);
+    const razorpayPlanId = this.resolveRazorpayPlanId(plan, billingCycle);
 
-    console.log(`[Razorpay] Creating subscription: userId=${userId} plan=${planKey}/${billingCycle} planId=${razorpayPlanId}`);
+    console.log(`[Razorpay] Creating subscription: userId=${userId} plan=${plan.name}/${billingCycle} planId=${razorpayPlanId}`);
 
     const razorpay = this.getInstance();
 
-    // Razorpay Subscription: charge_at = null means charge immediately on authorization
     const razorpaySubscription = await (razorpay.subscriptions as any).create({
       plan_id: razorpayPlanId,
-      total_count: billingCycle === "yearly" ? 12 : 120, // 12 yearly / 120 monthly (10 years max)
+      total_count: billingCycle === "yearly" ? 12 : 120,
       quantity: 1,
       notify_info: {
         notify_phone: "",
@@ -111,6 +134,7 @@ export class RazorpaySubscriptionService {
         planName: plan.name,
         planKey,
         billingCycle,
+        provider: PaymentProvider.RAZORPAY,
       },
     });
 
@@ -120,8 +144,8 @@ export class RazorpaySubscriptionService {
     await PaymentRepository.createPayment({
       userId: new Types.ObjectId(userId),
       membershipId: plan._id as Types.ObjectId,
-      amount: plan.price * 100, // in paise
-      currency: plan.currency || "INR",
+      amount: priceDetails.price * 100, // in paise
+      currency: priceDetails.currency,
       status: PaymentStatus.PENDING,
       provider: PaymentProvider.RAZORPAY,
       providerSubscriptionId: razorpaySubscription.id,
@@ -144,22 +168,19 @@ export class RazorpaySubscriptionService {
       planName: plan.name,
       planKey,
       billingCycle,
-      amount: plan.price * 100,
-      currency: plan.currency || "INR",
+      amount: priceDetails.price * 100,
+      currency: priceDetails.currency,
       membership: {
         id: plan._id,
         name: plan.name,
-        price: plan.price,
-        durationInDays: plan.durationInDays,
+        price: priceDetails.price,
+        durationInDays: priceDetails.durationInDays,
       },
     };
   }
 
   /**
-   * Verify the initial Razorpay subscription payment.
-   * Called from frontend after the Razorpay checkout modal closes successfully.
-   *
-   * For subscriptions the signature format is: hmac(razorpay_payment_id | "|" | razorpay_subscription_id)
+   * Verify initial Razorpay subscription payment
    */
   static async verifySubscriptionPayment(
     userId: string,
@@ -182,11 +203,12 @@ export class RazorpaySubscriptionService {
       throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Razorpay subscription signature verification failed.");
     }
 
-    // Idempotency: if subscription already activated, return it
+    // Idempotency check: if subscription already active, return it
     const existingSub = await Subscription.findOne({
       userId: new Types.ObjectId(userId),
       providerSubscriptionId: razorpay_subscription_id,
-      status: "ACTIVE",
+      status: SubscriptionStatus.ACTIVE,
+      isDeleted: { $ne: true },
     });
     if (existingSub) {
       console.log(`[Razorpay] Subscription already active: subId=${razorpay_subscription_id}`);
@@ -209,33 +231,33 @@ export class RazorpaySubscriptionService {
     }
 
     const billingCycle: BillingCycle = (payment.metadata?.billingCycle as BillingCycle) || "monthly";
-    const durationDays = billingCycle === "yearly" ? 365 : plan.durationInDays || 30;
+    const priceDetails = MembershipService.getPlanPriceDetails(plan, billingCycle);
 
     // Expire old active subscriptions
     await MembershipRepository.expireActiveSubscriptions(userId);
 
     const startDate = new Date();
-    const endDate = new Date(startDate.getTime() + durationDays * 24 * 60 * 60 * 1000);
+    const endDate = new Date(startDate.getTime() + priceDetails.durationInDays * 24 * 60 * 60 * 1000);
 
     const subscription = await MembershipRepository.createSubscription({
       userId: new Types.ObjectId(userId),
       membershipId: plan._id as Types.ObjectId,
       role: userRole,
       planName: plan.name,
-      amount: plan.price,
-      currency: plan.currency || "INR",
+      amount: priceDetails.price,
+      currency: priceDetails.currency,
       billingCycle,
+      provider: PaymentProvider.RAZORPAY,
       startDate,
       endDate,
       currentPeriodStart: startDate,
       currentPeriodEnd: endDate,
-      status: "ACTIVE",
-      autoRenew: true,
+      status: SubscriptionStatus.ACTIVE,
       cancelAtPeriodEnd: false,
       providerSubscriptionId: razorpay_subscription_id,
       nextBillingDate: endDate,
       lastPaymentStatus: "SUCCESS",
-    } as any);
+    });
 
     // Update payment record
     payment.status = PaymentStatus.SUCCESS;
@@ -254,8 +276,7 @@ export class RazorpaySubscriptionService {
   }
 
   /**
-   * Cancel Razorpay subscription at period end (or immediately).
-   * cancelAtPeriodEnd=true means the user keeps access until the current period ends.
+   * Cancel Razorpay subscription (sets cancelAtPeriodEnd = true)
    */
   static async cancelSubscription(
     userId: string,
@@ -263,7 +284,8 @@ export class RazorpaySubscriptionService {
   ) {
     const sub = await Subscription.findOne({
       userId: new Types.ObjectId(userId),
-      status: "ACTIVE",
+      status: SubscriptionStatus.ACTIVE,
+      isDeleted: { $ne: true },
     });
 
     if (!sub) {
@@ -273,7 +295,7 @@ export class RazorpaySubscriptionService {
     if (!sub.providerSubscriptionId) {
       throw new ApiError(
         HTTP_STATUS.BAD_REQUEST,
-        "This subscription was not created via Razorpay recurring. Use the standard cancel endpoint."
+        "This subscription was not created via Razorpay recurring. Use standard cancel endpoint."
       );
     }
 
@@ -281,25 +303,28 @@ export class RazorpaySubscriptionService {
 
     console.log(`[Razorpay] Cancelling subscription: subId=${sub.providerSubscriptionId} cancelAtEnd=${cancelAtPeriodEnd}`);
 
-    // Razorpay cancel: cancelAtCycleEnd=1 means cancel at end of current billing period
-    await (razorpay.subscriptions as any).cancel(
-      sub.providerSubscriptionId,
-      cancelAtPeriodEnd ? 1 : 0
-    );
+    try {
+      await (razorpay.subscriptions as any).cancel(
+        sub.providerSubscriptionId,
+        cancelAtPeriodEnd ? 1 : 0
+      );
+    } catch (err: any) {
+      console.warn(`[Razorpay] Warning: Gateway cancel call failed (may already be cancelled): ${err?.message}`);
+    }
 
     sub.cancelAtPeriodEnd = cancelAtPeriodEnd;
-    sub.autoRenew = false;
-    if (!cancelAtPeriodEnd) {
-      sub.status = "CANCELLED";
-      sub.cancelledAt = new Date();
-    }
-    await sub.save();
+    sub.cancelledAt = new Date();
 
-    console.log(`[Razorpay] Subscription cancel scheduled: subId=${sub.providerSubscriptionId}`);
+    if (!cancelAtPeriodEnd) {
+      sub.status = SubscriptionStatus.CANCELLED;
+      sub.cancelledReason = "Cancelled immediately by user";
+    }
+
+    await sub.save();
 
     return {
       message: cancelAtPeriodEnd
-        ? `Auto-renewal cancelled. You'll retain access until ${sub.currentPeriodEnd.toLocaleDateString("en-IN")}.`
+        ? `Auto-renewal cancelled. Access retained until ${sub.currentPeriodEnd.toLocaleDateString("en-IN")}.`
         : "Subscription cancelled immediately.",
       subscription: sub,
     };
@@ -307,7 +332,6 @@ export class RazorpaySubscriptionService {
 
   /**
    * Process Razorpay subscription webhook events.
-   * Called from the main webhook handler when event relates to a subscription.
    */
   static async processSubscriptionWebhookEvent(event: any) {
     const eventType: string = event.event;
@@ -326,9 +350,8 @@ export class RazorpaySubscriptionService {
     switch (eventType) {
       case "subscription.activated": {
         if (sub) {
-          sub.status = "ACTIVE";
+          sub.status = SubscriptionStatus.ACTIVE;
           sub.cancelAtPeriodEnd = false;
-          sub.autoRenew = true;
           if (subscriptionEntity.current_end) {
             sub.nextBillingDate = new Date(subscriptionEntity.current_end * 1000);
             sub.currentPeriodEnd = new Date(subscriptionEntity.current_end * 1000);
@@ -340,7 +363,6 @@ export class RazorpaySubscriptionService {
       }
 
       case "subscription.charged": {
-        // Recurring charge succeeded — create a new payment record and extend the period
         if (sub && paymentEntity) {
           const alreadyProcessed = await Payment.findOne({
             providerPaymentId: paymentEntity.id,
@@ -362,14 +384,13 @@ export class RazorpaySubscriptionService {
             });
           }
 
-          // Extend subscription period
           if (subscriptionEntity.current_start && subscriptionEntity.current_end) {
             sub.currentPeriodStart = new Date(subscriptionEntity.current_start * 1000);
             sub.currentPeriodEnd = new Date(subscriptionEntity.current_end * 1000);
             sub.endDate = new Date(subscriptionEntity.current_end * 1000);
             sub.nextBillingDate = new Date(subscriptionEntity.current_end * 1000);
             sub.lastPaymentStatus = "SUCCESS";
-            sub.status = "ACTIVE";
+            sub.status = SubscriptionStatus.ACTIVE;
             await sub.save();
           }
         }
@@ -378,11 +399,8 @@ export class RazorpaySubscriptionService {
 
       case "subscription.cancelled": {
         if (sub) {
-          // If cancelled at period end, keep ACTIVE until period ends (the expiry sweep handles it)
           sub.cancelAtPeriodEnd = true;
-          sub.autoRenew = false;
           sub.cancelledAt = new Date();
-          // Don't set status=CANCELLED here — let the subscription run out
           await sub.save();
         }
         break;
@@ -391,8 +409,7 @@ export class RazorpaySubscriptionService {
       case "subscription.completed":
       case "subscription.expired": {
         if (sub) {
-          sub.status = "EXPIRED";
-          sub.autoRenew = false;
+          sub.status = SubscriptionStatus.EXPIRED;
           await sub.save();
         }
         break;
@@ -400,7 +417,7 @@ export class RazorpaySubscriptionService {
 
       case "subscription.halted": {
         if (sub) {
-          sub.status = "PAST_DUE";
+          sub.status = SubscriptionStatus.PAST_DUE;
           sub.lastPaymentStatus = "FAILED";
           await sub.save();
         }

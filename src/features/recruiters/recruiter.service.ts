@@ -194,7 +194,7 @@ export class RecruiterService {
             $or: [{ userId: recUserId }, { ownerId: recUserId }],
           }).catch(() => null);
           if (comp) {
-            recObj.companyId = comp;
+            (recObj as any).companyId = comp;
             recObj.currentCompany = comp.name;
           }
         }

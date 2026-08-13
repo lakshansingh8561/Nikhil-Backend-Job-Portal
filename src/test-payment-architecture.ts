@@ -45,12 +45,13 @@ async function testPaymentArchitecture() {
     planName: membership.name,
     amount: membership.price,
     currency: membership.currency,
+    provider: PaymentProvider.RAZORPAY,
     startDate,
     endDate,
     currentPeriodStart: startDate,
     currentPeriodEnd: endDate,
     status: "ACTIVE",
-    autoRenew: true,
+    cancelAtPeriodEnd: false,
   });
 
   console.log(`Subscription created successfully! ID: ${testSubscription._id}, End Date: ${testSubscription.endDate.toISOString()}`);
