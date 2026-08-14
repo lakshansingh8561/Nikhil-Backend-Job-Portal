@@ -9,9 +9,10 @@ import {
   PLAN_LEVELS,
 } from "./membership.constants";
 import { Types } from "mongoose";
-import { Job, Payment, Subscription, Membership, IMembership, IMembershipPrice, BillingCycle } from "../../database/models";
+import { Job, Payment, Subscription, Membership, User, IMembership, IMembershipPrice, BillingCycle } from "../../database/models";
 import { EmailService } from "../../common/services/email.service";
 import { PaymentProvider, SubscriptionStatus } from "../../common/enums";
+import { env } from "../../config/env";
 
 export class MembershipService {
   /**
@@ -34,6 +35,19 @@ export class MembershipService {
       currency: plan.currency || "INR",
       durationInDays,
     };
+  }
+
+  /**
+   * Calculate exact calendar subscription end date (1 month / 1 year from start date)
+   */
+  static calculateSubscriptionEndDate(startDate: Date, billingCycle: BillingCycle = "monthly"): Date {
+    const endDate = new Date(startDate);
+    if (billingCycle === "yearly") {
+      endDate.setFullYear(endDate.getFullYear() + 1);
+    } else {
+      endDate.setMonth(endDate.getMonth() + 1);
+    }
+    return endDate;
   }
 
   /**
@@ -204,6 +218,36 @@ export class MembershipService {
     await this.expireOverdueSubscriptions(userId);
     let subscription = await MembershipRepository.findActiveSubscription(userId);
 
+    // Fallback: If DB subscription is missing or inactive, sync with Polar Sandbox API
+    if (!subscription && env.POLAR_ACCESS_TOKEN) {
+      try {
+        const { PolarService } = await import("../payments/polar.service");
+        const user = await User.findById(userId);
+        const polar = PolarService.getPolarInstance();
+        const subsList = await polar.subscriptions.list({ limit: 20 });
+        const items = (subsList as any)?.result?.items || (subsList as any)?.items || [];
+
+        const matchingSub = items.find((s: any) =>
+          (s.status === "active" || s.status === "succeeded") &&
+          (s.metadata?.userId === userId ||
+            (user && s.customer?.email === user.email) ||
+            (user && s.customer?.email?.startsWith(`${user.email.split('@')[0]}+`)))
+        );
+
+        if (matchingSub) {
+          await PolarService.processSubscriptionActivation({
+            checkout_id: matchingSub.id,
+            customer_external_id: userId,
+            subscription_id: matchingSub.id,
+            metadata: matchingSub.metadata,
+          });
+          subscription = await MembershipRepository.findActiveSubscription(userId);
+        }
+      } catch (polarSyncErr) {
+        console.warn("[Polar Sync Warning] Failed to sync active recruiter sub from Polar API:", polarSyncErr);
+      }
+    }
+
     const activeJobsCount = await Job.countDocuments({
       userId: new Types.ObjectId(userId),
       isDeleted: { $ne: true },
@@ -271,7 +315,7 @@ export class MembershipService {
     }
 
     const startDate = new Date();
-    const endDate = new Date(startDate.getTime() + priceDetails.durationInDays * 24 * 60 * 60 * 1000);
+    const endDate = MembershipService.calculateSubscriptionEndDate(startDate, billingCycle);
 
     const isFreePlan = priceDetails.price === 0;
     const effectiveProvider = isFreePlan ? PaymentProvider.MANUAL : provider;
@@ -336,6 +380,34 @@ export class MembershipService {
         HTTP_STATUS.BAD_REQUEST,
         MEMBERSHIP_MESSAGES.NO_ACTIVE_SUBSCRIPTION
       );
+    }
+
+    if (activeSub.cancelAtPeriodEnd) {
+      throw new ApiError(
+        HTTP_STATUS.BAD_REQUEST,
+        "Auto-renewal is already turned off for this subscription."
+      );
+    }
+
+    // Provider-specific AutoPay cancellation (Polar or Razorpay)
+    if (
+      activeSub.provider === PaymentProvider.POLAR ||
+      (activeSub.providerSubscriptionId && !activeSub.providerSubscriptionId.startsWith("sub_"))
+    ) {
+      const { PolarService } = await import("../payments/polar.service");
+      return PolarService.cancelAutoPay(userId);
+    }
+
+    if (
+      activeSub.provider === PaymentProvider.RAZORPAY ||
+      (activeSub.providerSubscriptionId && activeSub.providerSubscriptionId.startsWith("sub_"))
+    ) {
+      const { RazorpaySubscriptionService } = await import("../payments/razorpay-subscription.service");
+      const res = await RazorpaySubscriptionService.cancelSubscription(userId, true);
+      return {
+        message: "AutoPay cancelled successfully. Paid access remains active until period end.",
+        subscription: res.subscription,
+      };
     }
 
     const cancelledSub = await MembershipRepository.cancelSubscription((activeSub._id as any).toString());

@@ -14,6 +14,8 @@ export interface IConversation extends Document {
   createdBy?: Types.ObjectId;
   participants: Types.ObjectId[];
   members: IConversationMember[];
+  recruiter?: Types.ObjectId;
+  jobSeeker?: Types.ObjectId;
   jobId?: Types.ObjectId;
   lastMessage?: Types.ObjectId;
   lastMessageAt?: Date;

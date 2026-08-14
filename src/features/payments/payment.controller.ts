@@ -4,11 +4,24 @@ import { asyncHandler } from "../../common/utils/asyncHandler";
 import { ApiResponse } from "../../common/utils/ApiResponse";
 import { HTTP_STATUS } from "../../common/constants/httpStatus";
 import { PAYMENT_MESSAGES } from "./payment.constants";
+import { env } from "../../config/env";
+import jwt from "jsonwebtoken";
 
 const getUserIdFromReq = (req: Request): string => {
   const user = (req as any).user;
-  if (!user) return "";
-  return String(user.userId || user.id || user._id || "");
+  if (user) return String(user.userId || user.id || user._id || "");
+
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    try {
+      const decoded: any = jwt.verify(authHeader.split(" ")[1], env.JWT_ACCESS_SECRET);
+      return String(decoded.userId || decoded.id || decoded._id || "");
+    } catch {
+      // Token verification failed or expired
+    }
+  }
+
+  return "";
 };
 
 const getUserRoleFromReq = (req: Request): any => {
