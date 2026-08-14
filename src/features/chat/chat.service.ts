@@ -129,10 +129,16 @@ export class ChatService {
       );
     }
 
+    const recruiterId = userRole === Role.RECRUITER ? userId : recipientId;
+    const jobSeekerId = userRole === Role.JOB_SEEKER ? userId : recipientId;
+
     let conversation = await Conversation.findOne({
       $or: [
         { participants: { $all: [new Types.ObjectId(userId), new Types.ObjectId(recipientId)] } },
         { "members.userId": { $all: [new Types.ObjectId(userId), new Types.ObjectId(recipientId)] } },
+        { recruiter: new Types.ObjectId(recruiterId), jobSeeker: new Types.ObjectId(jobSeekerId) },
+        { recruiter: new Types.ObjectId(userId), jobSeeker: new Types.ObjectId(recipientId) },
+        { recruiter: new Types.ObjectId(recipientId), jobSeeker: new Types.ObjectId(userId) },
       ],
       isDeleted: { $ne: true },
     });
@@ -141,6 +147,8 @@ export class ChatService {
       conversation = await Conversation.create({
         type: "DIRECT",
         createdBy: new Types.ObjectId(userId),
+        recruiter: new Types.ObjectId(recruiterId),
+        jobSeeker: new Types.ObjectId(jobSeekerId),
         participants: [new Types.ObjectId(userId), new Types.ObjectId(recipientId)],
         members: [
           { userId: new Types.ObjectId(userId), joinedAt: new Date() },
@@ -150,7 +158,7 @@ export class ChatService {
       });
     }
 
-    return this.getConversationById(userId, conversation.id);
+    return this.getConversationById(userId, (conversation._id || conversation.id).toString());
   }
 
   /**

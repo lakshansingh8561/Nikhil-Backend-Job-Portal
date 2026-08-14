@@ -39,7 +39,8 @@ export const env = {
   POLAR_PRO_YEARLY_PRODUCT_ID: process.env.POLAR_PRO_YEARLY_PRODUCT_ID || process.env.POLAR_PRO_PRODUCT_ID || "",
   POLAR_PREMIUM_MONTHLY_PRODUCT_ID: process.env.POLAR_PREMIUM_MONTHLY_PRODUCT_ID || process.env.POLAR_PREMIUM_PRODUCT_ID || "",
   POLAR_PREMIUM_YEARLY_PRODUCT_ID: process.env.POLAR_PREMIUM_YEARLY_PRODUCT_ID || process.env.POLAR_PREMIUM_PRODUCT_ID || "",
-
+  POLAR_RECRUITER_PROFESSIONAL_PRODUCT_ID: (process.env.POLAR_RECRUITER_PROFESSIONAL_PRODUCT_ID || "").trim(),
+  POLAR_RECRUITER_ENTERPRISE_PRODUCT_ID: (process.env.POLAR_RECRUITER_ENTERPRISE_PRODUCT_ID || "").trim(),
   // ── Razorpay ──────────────────────────────────────────────────────────────
   RAZORPAY_KEY_ID: process.env.RAZORPAY_KEY_ID || process.env.RAZORPAY_TEST_KEY || "",
   RAZORPAY_KEY_SECRET: process.env.RAZORPAY_KEY_SECRET || process.env.RAZORPAY_SECRET_KEY || "",
@@ -51,4 +52,4 @@ export const env = {
   RAZORPAY_PREMIUM_YEARLY_PLAN_ID: process.env.RAZORPAY_PREMIUM_YEARLY_PLAN_ID || "",
 
   FRONTEND_URL: process.env.FRONTEND_URL || process.env.CLIENT_URL || "http://localhost:5173",
-};
+};

@@ -93,13 +93,13 @@ EXCEPTION
 END $$;
 
 DO $$ BEGIN
-    CREATE TYPE payment_status AS ENUM ('PENDING', 'AUTHORIZED', 'CAPTURED', 'SUCCESS', 'FAILED', 'PAID', 'PAST_DUE', 'REFUNDED');
+    CREATE TYPE payment_status AS ENUM ('PENDING', 'AUTHORIZED', 'CAPTURED', 'PROCESSING', 'SUCCESS', 'FAILED', 'PAID', 'PAST_DUE', 'CANCELLED', 'REFUNDED');
 EXCEPTION
     WHEN duplicate_object THEN null;
 END $$;
 
 DO $$ BEGIN
-    CREATE TYPE payment_provider AS ENUM ('RAZORPAY', 'STRIPE', 'PAYPAL', 'MANUAL');
+    CREATE TYPE payment_provider AS ENUM ('RAZORPAY', 'POLAR', 'STRIPE', 'PAYPAL', 'MANUAL');
 EXCEPTION
     WHEN duplicate_object THEN null;
 END $$;
@@ -488,6 +488,7 @@ CREATE TABLE IF NOT EXISTS memberships (
     price NUMERIC(10, 2) NOT NULL DEFAULT 0 CHECK (price >= 0),
     currency VARCHAR(10) DEFAULT 'INR' CHECK (currency IN ('INR', 'USD', 'EUR', 'GBP')),
     duration_in_days INT NOT NULL DEFAULT 30 CHECK (duration_in_days > 0),
+    prices JSONB DEFAULT '[]'::jsonb,
     description TEXT DEFAULT '',
     features JSONB DEFAULT '[]'::jsonb,
     is_popular BOOLEAN NOT NULL DEFAULT FALSE,
@@ -513,15 +514,23 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     plan_name VARCHAR(100) NOT NULL,
     amount NUMERIC(10, 2) NOT NULL DEFAULT 0 CHECK (amount >= 0),
     currency VARCHAR(10) DEFAULT 'INR' CHECK (currency IN ('INR', 'USD', 'EUR', 'GBP')),
+    billing_cycle VARCHAR(20) DEFAULT 'monthly' CHECK (billing_cycle IN ('monthly', 'yearly')),
+    provider payment_provider NOT NULL DEFAULT 'RAZORPAY',
     start_date TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     end_date TIMESTAMPTZ NOT NULL,
     current_period_start TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     current_period_end TIMESTAMPTZ,
-    razorpay_subscription_id VARCHAR(255) DEFAULT '',
     status subscription_status NOT NULL DEFAULT 'PENDING',
     payment_status payment_status NOT NULL DEFAULT 'PENDING',
+    razorpay_subscription_id VARCHAR(255) DEFAULT '',
+    provider_subscription_id VARCHAR(255) DEFAULT NULL,
+    provider_customer_id VARCHAR(255) DEFAULT NULL,
     auto_renew BOOLEAN NOT NULL DEFAULT TRUE,
+    cancel_at_period_end BOOLEAN NOT NULL DEFAULT FALSE,
+    next_billing_date TIMESTAMPTZ DEFAULT NULL,
+    last_payment_status VARCHAR(50) DEFAULT NULL,
     cancelled_at TIMESTAMPTZ,
+    cancelled_reason TEXT DEFAULT NULL,
     is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
     deleted_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -548,10 +557,14 @@ CREATE TABLE IF NOT EXISTS payments (
     razorpay_signature VARCHAR(255),
     provider_payment_id VARCHAR(255),
     provider_order_id VARCHAR(255),
+    provider_subscription_id VARCHAR(255),
+    payment_method VARCHAR(100),
     method VARCHAR(100),
     failure_reason TEXT,
+    provider_data JSONB DEFAULT '{}'::jsonb,
     metadata JSONB DEFAULT '{}'::jsonb,
     paid_at TIMESTAMPTZ,
+    refunded_at TIMESTAMPTZ,
     is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
     deleted_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -624,6 +637,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_one_recommended_membership_per_role ON mem
 -- Idempotency indexes for payment gateway
 CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_provider_payment_id ON payments(provider, provider_payment_id) WHERE provider_payment_id IS NOT NULL AND provider_payment_id != '';
 CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_provider_order_id ON payments(provider, provider_order_id) WHERE provider_order_id IS NOT NULL AND provider_order_id != '';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_subscriptions_provider_subscription_id ON subscriptions(provider, provider_subscription_id) WHERE provider_subscription_id IS NOT NULL AND provider_subscription_id != '';
 
 CREATE INDEX IF NOT EXISTS idx_subscriptions_user_end_date ON subscriptions(user_id, end_date);
 CREATE INDEX IF NOT EXISTS idx_payments_user_status ON payments(user_id, status);

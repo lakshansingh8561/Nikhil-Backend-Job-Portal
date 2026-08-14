@@ -47,6 +47,14 @@ const conversationSchema = new Schema<IConversation>(
       type: [conversationMemberSchema],
       default: [],
     },
+    recruiter: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+    },
+    jobSeeker: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+    },
     jobId: {
       type: Schema.Types.ObjectId,
       ref: "Job",
@@ -74,7 +82,7 @@ const conversationSchema = new Schema<IConversation>(
   }
 );
 
-conversationSchema.pre("save", function (next) {
+conversationSchema.pre("save", function (this: any, next) {
   if (this.members && this.members.length > 0 && (!this.participants || this.participants.length === 0)) {
     this.participants = this.members.map((m: any) => m.userId);
   } else if (this.participants && this.participants.length > 0 && (!this.members || this.members.length === 0)) {
@@ -91,3 +99,8 @@ export const Conversation = model<IConversation>(
   "Conversation",
   conversationSchema
 );
+
+// Sync indexes with MongoDB to clean up stale legacy unique indexes
+Conversation.syncIndexes().catch((err) => {
+  console.warn("[Conversation Model] Stale index sync info:", err?.message);
+});
