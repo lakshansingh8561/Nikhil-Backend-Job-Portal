@@ -11,3 +11,4 @@ export * from "./chat";
 export * from "./membership";
 export * from "./subscription";
 export * from "./payment";
+export * from "./otp";

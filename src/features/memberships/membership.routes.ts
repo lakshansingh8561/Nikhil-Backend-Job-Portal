@@ -30,4 +30,13 @@ router.post("/recruiter/subscribe", authenticate, authorize(Role.RECRUITER), val
 router.post("/recruiter/cancel", authenticate, authorize(Role.RECRUITER), validate(cancelSubscriptionSchema), MembershipController.cancelSubscription);
 router.get("/recruiter/history", authenticate, authorize(Role.RECRUITER), MembershipController.getHistory);
 
+/**
+ * Protected Admin Management Routes
+ */
+router.get("/admin/all", authenticate, authorize(Role.ADMIN), MembershipController.getAllAdminMemberships);
+router.post("/admin", authenticate, authorize(Role.ADMIN), MembershipController.createMembershipPlan);
+router.put("/admin/:id", authenticate, authorize(Role.ADMIN), MembershipController.updateMembershipPlan);
+router.patch("/admin/:id/toggle-status", authenticate, authorize(Role.ADMIN), MembershipController.toggleMembershipStatus);
+router.delete("/admin/:id", authenticate, authorize(Role.ADMIN), MembershipController.deleteMembershipPlan);
+
 export const membershipRoutes = router;

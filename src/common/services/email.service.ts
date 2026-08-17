@@ -533,4 +533,70 @@ export class EmailService {
 
     return this.sendMail({ to: adminEmail, subject, html });
   }
+
+  /**
+   * 7. Send Registration OTP Code to user
+   */
+  public static async sendRegistrationOtp({
+    email,
+    otp,
+  }: {
+    email: string;
+    otp: string;
+  }) {
+    const subject = `🔐 ${otp} is your JobBox Email Verification Code`;
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f5f7fc; margin: 0; padding: 0; }
+          .container { max-width: 580px; margin: 30px auto; background: #ffffff; border-radius: 20px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.06); border: 1px solid #eaeff7; }
+          .header { background: linear-gradient(135deg, #05264E 0%, #1D4ED8 100%); padding: 36px 24px; text-align: center; color: #ffffff; }
+          .header h1 { margin: 0; font-size: 26px; font-weight: 900; letter-spacing: -0.5px; }
+          .header p { margin: 6px 0 0; font-size: 13px; opacity: 0.9; font-weight: 500; }
+          .content { padding: 36px 28px; color: #05264E; text-align: center; }
+          .greeting { font-size: 18px; font-weight: 800; margin-bottom: 12px; color: #05264E; text-align: left; }
+          .message { font-size: 14px; line-height: 1.6; color: #66789c; margin-bottom: 28px; text-align: left; }
+          .otp-card { background: #F8FAFC; border-radius: 16px; padding: 28px 20px; border: 2px dashed #3B5BDB; margin: 24px 0; text-align: center; }
+          .otp-label { font-size: 11px; font-weight: 800; color: #66789C; text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 10px; }
+          .otp-code { font-size: 38px; font-weight: 900; color: #1D4ED8; letter-spacing: 8px; font-family: monospace; }
+          .expiry-note { font-size: 12px; color: #94A3B8; margin-top: 10px; font-weight: 600; }
+          .footer { background: #f8fafc; padding: 20px; text-align: center; font-size: 12px; color: #94a3b8; border-top: 1px solid #eaeff7; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>JobBox Portal</h1>
+            <p>Email Address Verification</p>
+          </div>
+          <div class="content">
+            <div class="greeting">Verify your email address</div>
+            <div class="message">
+              Welcome to JobBox! Please use the 6-digit verification code below to complete your registration. This code will expire in <strong>10 minutes</strong>.
+            </div>
+
+            <div class="otp-card">
+              <div class="otp-label">Your Verification OTP Code</div>
+              <div class="otp-code">${otp}</div>
+              <div class="expiry-note">Valid for 10 minutes • Do not share this code with anyone</div>
+            </div>
+
+            <div class="message" style="font-size: 12px; color: #94A3B8;">
+              If you did not request this email, please ignore it or contact our support team.
+            </div>
+          </div>
+          <div class="footer">
+            © ${new Date().getFullYear()} JobBox Recruitment Platform. All rights reserved.
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    return this.sendMail({ to: email, subject, html });
+  }
 }

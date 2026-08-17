@@ -11,6 +11,16 @@ const router = Router();
  * Public Routes
  */
 router.post(
+  "/send-otp",
+  AuthController.sendOtp
+);
+
+router.post(
+  "/verify-otp",
+  AuthController.verifyOtp
+);
+
+router.post(
   "/register",
   validate(AuthValidation.register),
   AuthController.register

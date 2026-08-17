@@ -11,8 +11,9 @@ export class MembershipController {
    * GET /api/v1/memberships - Get all active Job Seeker plans
    */
   static getMemberships = asyncHandler(
-    async (_req: Request, res: Response) => {
-      const plans = await MembershipService.getActiveMemberships(Role.JOB_SEEKER);
+    async (req: Request, res: Response) => {
+      const currency = (req.query.currency as "USD" | "INR") || undefined;
+      const plans = await MembershipService.getActiveMemberships(Role.JOB_SEEKER, currency);
 
       res
         .status(HTTP_STATUS.OK)
@@ -30,8 +31,9 @@ export class MembershipController {
    * GET /api/v1/memberships/recruiter - Get all active Recruiter plans
    */
   static getRecruiterMemberships = asyncHandler(
-    async (_req: Request, res: Response) => {
-      const plans = await MembershipService.getActiveMemberships(Role.RECRUITER);
+    async (req: Request, res: Response) => {
+      const currency = (req.query.currency as "USD" | "INR") || undefined;
+      const plans = await MembershipService.getActiveMemberships(Role.RECRUITER, currency);
 
       res
         .status(HTTP_STATUS.OK)
@@ -42,6 +44,63 @@ export class MembershipController {
             plans
           )
         );
+    }
+  );
+
+  // =========================================================================
+  // ADMIN MEMBERSHIP MANAGEMENT ENDPOINTS
+  // =========================================================================
+  static getAllAdminMemberships = asyncHandler(
+    async (_req: Request, res: Response) => {
+      const plans = await MembershipService.getAllAdminMemberships();
+      res
+        .status(HTTP_STATUS.OK)
+        .json(new ApiResponse(true, "All membership plans fetched for Admin.", plans));
+    }
+  );
+
+  static createMembershipPlan = asyncHandler(
+    async (req: Request, res: Response) => {
+      const plan = await MembershipService.createMembershipPlan(req.body);
+      res
+        .status(HTTP_STATUS.CREATED)
+        .json(new ApiResponse(true, "Membership plan created successfully.", plan));
+    }
+  );
+
+  static updateMembershipPlan = asyncHandler(
+    async (req: Request, res: Response) => {
+      const id = req.params.id as string;
+      const plan = await MembershipService.updateMembershipPlan(id, req.body);
+      res
+        .status(HTTP_STATUS.OK)
+        .json(new ApiResponse(true, "Membership plan updated successfully.", plan));
+    }
+  );
+
+  static toggleMembershipStatus = asyncHandler(
+    async (req: Request, res: Response) => {
+      const id = req.params.id as string;
+      const plan = await MembershipService.toggleMembershipStatus(id);
+      res
+        .status(HTTP_STATUS.OK)
+        .json(
+          new ApiResponse(
+            true,
+            `Membership plan ${plan.isActive ? "activated" : "deactivated"} successfully.`,
+            plan
+          )
+        );
+    }
+  );
+
+  static deleteMembershipPlan = asyncHandler(
+    async (req: Request, res: Response) => {
+      const id = req.params.id as string;
+      const result = await MembershipService.deleteMembershipPlan(id);
+      res
+        .status(HTTP_STATUS.OK)
+        .json(new ApiResponse(true, result.message, null));
     }
   );
 

@@ -29,6 +29,7 @@ export interface IMembership extends Document {
   role: Role;
   price: number;
   currency: string;
+  planId?: string;
   durationInDays: number;
   prices?: IMembershipPrice[];
   description: string;

@@ -2,7 +2,13 @@ import { Router } from "express";
 import { PaymentController } from "./payment.controller";
 import { authenticate } from "../../common/middlewares/auth.middleware";
 import { validate } from "../../common/middlewares/validate.middleware";
-import { createOrderSchema, verifyPaymentSchema, createPolarCheckoutSchema } from "./payment.validation";
+import {
+  createOrderSchema,
+  verifyPaymentSchema,
+  createPolarCheckoutSchema,
+  createRazorpaySubscriptionSchema,
+  verifyRazorpaySubscriptionSchema,
+} from "./payment.validation";
 
 const router = Router();
 
@@ -24,6 +30,19 @@ router.post(
   "/verify",
   validate(verifyPaymentSchema),
   PaymentController.verifyPayment
+);
+
+// Razorpay Subscriptions (Recurring Mandate)
+router.post(
+  "/razorpay-subscription/create",
+  validate(createRazorpaySubscriptionSchema),
+  PaymentController.createRazorpaySubscription
+);
+
+router.post(
+  "/razorpay-subscription/verify",
+  validate(verifyRazorpaySubscriptionSchema),
+  PaymentController.verifyRazorpaySubscription
 );
 
 router.get("/preview-upgrade", PaymentController.previewUpgrade);

@@ -72,26 +72,180 @@ export class MembershipService {
    */
   static async seedDefaultMemberships(): Promise<void> {
     try {
+      // Drop old unique index name_1_role_1 from MongoDB collection if present
+      await Membership.collection.dropIndex("name_1_role_1").catch(() => {});
+
       const allPlans = [...DEFAULT_MEMBERSHIP_PLANS, ...DEFAULT_RECRUITER_MEMBERSHIP_PLANS];
       for (const defaultPlan of allPlans) {
         await Membership.updateOne(
-          { name: defaultPlan.name, role: defaultPlan.role },
+          { name: defaultPlan.name, role: defaultPlan.role, currency: defaultPlan.currency },
           { $set: defaultPlan },
           { upsert: true }
         );
       }
-      console.log("✅ Default Membership plans synced to USD ($0 Free, $5 Pro, $10 Premium) successfully.");
+      console.log("✅ Default Membership plans synced successfully.");
     } catch (error) {
       console.error("⚠️ Failed to seed default membership plans:", error);
     }
   }
 
   /**
-   * Get all active membership plans by role
+   * Get all active membership plans by role & target currency (USD vs INR)
    */
-  static async getActiveMemberships(role: Role = Role.JOB_SEEKER) {
-    const plans = await MembershipRepository.findActiveMemberships(role);
+  static async getActiveMemberships(role: Role = Role.JOB_SEEKER, targetCurrency: "USD" | "INR" = "USD") {
+    const query: any = { role, isActive: true, isDeleted: { $ne: true } };
+    const plans = await Membership.find(query).sort({ price: 1 });
+
+    return plans
+      .filter((planDoc) => {
+        if (planDoc.price === 0) return true;
+
+        const curr = planDoc.currency || "USD";
+        if (targetCurrency === "INR") {
+          return curr === "INR" || planDoc.prices?.some((p) => p.currency === "INR");
+        } else {
+          return curr === "USD" || curr === "$" || (!planDoc.currency && !planDoc.prices?.some((p) => p.currency === "INR"));
+        }
+      })
+      .map((planDoc) => {
+        const plan = planDoc.toObject();
+
+        if (targetCurrency === "INR") {
+          if (plan.currency === "INR") {
+            plan.price = plan.price;
+          } else {
+            const inrPriceObj = plan.prices?.find((p) => p.currency === "INR");
+            if (inrPriceObj) {
+              plan.price = inrPriceObj.price;
+            }
+            plan.currency = "INR";
+          }
+        } else {
+          if (plan.currency === "USD") {
+            plan.price = plan.price;
+          } else {
+            const usdPriceObj = plan.prices?.find((p) => p.currency === "USD");
+            if (usdPriceObj) {
+              plan.price = usdPriceObj.price;
+            }
+            plan.currency = "USD";
+          }
+        }
+
+        return plan;
+      });
+  }
+
+  /**
+   * Admin: Get all membership plans (active & inactive)
+   */
+  static async getAllAdminMemberships() {
+    const plans = await Membership.find({ isDeleted: { $ne: true } }).sort({ role: 1, price: 1 });
     return plans;
+  }
+
+  /**
+   * Admin: Create a new membership plan
+   */
+  static async createMembershipPlan(data: Partial<IMembership>) {
+    if (!data.name || !data.role) {
+      throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Plan name and role are required.");
+    }
+
+    const selectedCurrency = data.currency || "USD";
+    const planPrice = Number(data.price || 0);
+
+    const prices: IMembershipPrice[] = [
+      {
+        billingCycle: "monthly",
+        price: planPrice,
+        currency: selectedCurrency,
+        durationInDays: Number(data.durationInDays || 30),
+        providerPriceIds: data.planId
+          ? [{ provider: PaymentProvider.RAZORPAY, providerPlanId: data.planId }]
+          : [],
+      },
+    ];
+
+    const newPlan = await Membership.create({
+      ...data,
+      price: planPrice,
+      currency: selectedCurrency,
+      planId: data.planId || "",
+      durationInDays: Number(data.durationInDays || 30),
+      prices,
+      isActive: data.isActive !== false,
+      isDeleted: false,
+    });
+
+    return newPlan;
+  }
+
+  /**
+   * Admin: Update existing membership plan
+   */
+  static async updateMembershipPlan(id: string, data: Partial<IMembership>) {
+    const plan = await Membership.findById(id);
+    if (!plan || plan.isDeleted) {
+      throw new ApiError(HTTP_STATUS.NOT_FOUND, "Membership plan not found.");
+    }
+
+    const selectedCurrency = data.currency || plan.currency || "USD";
+    const planPrice = data.price !== undefined ? Number(data.price) : plan.price;
+
+    const prices: IMembershipPrice[] = [
+      {
+        billingCycle: "monthly",
+        price: planPrice,
+        currency: selectedCurrency,
+        durationInDays: Number(data.durationInDays || plan.durationInDays || 30),
+        providerPriceIds: (data.planId || plan.planId)
+          ? [{ provider: PaymentProvider.RAZORPAY, providerPlanId: data.planId || plan.planId || "" }]
+          : [],
+      },
+    ];
+
+    Object.assign(plan, {
+      ...data,
+      price: planPrice,
+      currency: selectedCurrency,
+      planId: data.planId !== undefined ? data.planId : plan.planId,
+      durationInDays: data.durationInDays !== undefined ? Number(data.durationInDays) : plan.durationInDays,
+      prices,
+    });
+
+    await plan.save();
+    return plan;
+  }
+
+  /**
+   * Admin: Toggle Active/Inactive status
+   */
+  static async toggleMembershipStatus(id: string) {
+    const plan = await Membership.findById(id);
+    if (!plan || plan.isDeleted) {
+      throw new ApiError(HTTP_STATUS.NOT_FOUND, "Membership plan not found.");
+    }
+
+    plan.isActive = !plan.isActive;
+    await plan.save();
+    return plan;
+  }
+
+  /**
+   * Admin: Soft-delete membership plan
+   */
+  static async deleteMembershipPlan(id: string) {
+    const plan = await Membership.findById(id);
+    if (!plan || plan.isDeleted) {
+      throw new ApiError(HTTP_STATUS.NOT_FOUND, "Membership plan not found.");
+    }
+
+    plan.isDeleted = true;
+    plan.deletedAt = new Date();
+    plan.isActive = false;
+    await plan.save();
+    return { message: "Membership plan deleted successfully." };
   }
 
   /**
