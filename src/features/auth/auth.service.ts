@@ -1,4 +1,4 @@
-import { User, UserProfile, JobSeekerProfile, RecruiterProfile } from "../../database/models";
+import { User, UserProfile, JobSeekerProfile, RecruiterProfile, Otp } from "../../database/models";
 import { ApiError } from "../../common/utils/ApiError";
 import { HTTP_STATUS } from "../../common/constants/httpStatus";
 import { AUTH_MESSAGES } from "./auth.constants";
@@ -112,6 +112,145 @@ export class AuthService {
     };
   }
 
+  static async sendRegistrationOtp(email: string): Promise<{ message: string }> {
+    if (!email || !email.includes("@")) {
+      throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Please provide a valid email address.");
+    }
+    const lowerEmail = email.toLowerCase().trim();
+
+    const existingUser = await User.findOne({ email: lowerEmail });
+    if (existingUser) {
+      throw new ApiError(
+        HTTP_STATUS.CONFLICT,
+        AUTH_MESSAGES.EMAIL_ALREADY_EXISTS
+      );
+    }
+
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+
+    await Otp.deleteMany({ email: lowerEmail });
+    await Otp.create({
+      email: lowerEmail,
+      otp: otpCode,
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes
+    });
+
+    const sent = await EmailService.sendRegistrationOtp({
+      email: lowerEmail,
+      otp: otpCode,
+    });
+
+    if (!sent) {
+      console.warn(`[AuthService] Fallback OTP for ${lowerEmail}: ${otpCode}`);
+    }
+
+    return {
+      message: `Verification code sent to ${lowerEmail}.`,
+    };
+  }
+
+  static async verifyOtpAndRegister(
+    payload: RegisterUserInput & { otp: string }
+  ): Promise<AuthResponse> {
+    const { email, password, role, otp } = payload;
+    if (!otp || otp.trim().length !== 6) {
+      throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Please enter a valid 6-digit OTP code.");
+    }
+
+    const lowerEmail = email.toLowerCase().trim();
+
+    const existingUser = await User.findOne({ email: lowerEmail });
+    if (existingUser) {
+      throw new ApiError(
+        HTTP_STATUS.CONFLICT,
+        AUTH_MESSAGES.EMAIL_ALREADY_EXISTS
+      );
+    }
+
+    const otpRecord = await Otp.findOne({ email: lowerEmail }).sort({ createdAt: -1 });
+
+    if (!otpRecord) {
+      throw new ApiError(
+        HTTP_STATUS.BAD_REQUEST,
+        "No OTP requested for this email or OTP expired. Please request a new OTP."
+      );
+    }
+
+    if (otpRecord.expiresAt < new Date()) {
+      await Otp.deleteMany({ email: lowerEmail });
+      throw new ApiError(
+        HTTP_STATUS.BAD_REQUEST,
+        "OTP code has expired. Please request a new OTP code."
+      );
+    }
+
+    if (otpRecord.otp.trim() !== otp.trim()) {
+      throw new ApiError(
+        HTTP_STATUS.BAD_REQUEST,
+        "Incorrect OTP code. Please enter the correct verification code sent to your email."
+      );
+    }
+
+    // OTP verified successfully, clean up OTP record
+    await Otp.deleteMany({ email: lowerEmail });
+
+    const hashedPassword = await hashPassword(password);
+
+    const user = await User.create({
+      email: lowerEmail,
+      password: hashedPassword,
+      role,
+      isVerified: true,
+    });
+
+    const defaultFirstName = lowerEmail.split("@")[0];
+
+    // Create UserProfile
+    await UserProfile.create({
+      userId: user._id,
+      firstName: defaultFirstName,
+      lastName: "",
+    }).catch((err) => console.error("UserProfile creation error:", err));
+
+    // Create JobSeekerProfile or RecruiterProfile
+    if (role === Role.JOB_SEEKER) {
+      await JobSeekerProfile.create({
+        userId: user._id,
+        yearsOfExperience: 0,
+      }).catch((err) => console.error("JobSeekerProfile creation error:", err));
+    } else if (role === Role.RECRUITER) {
+      await RecruiterProfile.create({
+        userId: user._id,
+        designation: "Recruiter",
+      }).catch((err) => console.error("RecruiterProfile creation error:", err));
+    }
+
+    const jwtPayload: JwtPayload = {
+      userId: user.id,
+      role: user.role,
+    };
+
+    const accessToken = generateAccessToken(jwtPayload);
+    const refreshToken = generateRefreshToken(jwtPayload);
+
+    // Notify admin about new user registration
+    EmailService.sendAdminUserActivityNotification({
+      userEmail: user.email,
+      role: user.role,
+      actionType: "SIGNUP",
+    }).catch((err) => console.error("[AuthService] Admin notification signup email error:", err));
+
+    return {
+      accessToken,
+      refreshToken,
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+      },
+    };
+  }
+
   static async register(
     payload: RegisterUserInput
   ): Promise<AuthResponse> {
@@ -133,6 +272,7 @@ export class AuthService {
       email: lowerEmail,
       password: hashedPassword,
       role,
+      isVerified: true,
     });
 
     const defaultFirstName = lowerEmail.split("@")[0];

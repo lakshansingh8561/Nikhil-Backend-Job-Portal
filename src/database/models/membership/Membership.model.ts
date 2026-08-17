@@ -88,6 +88,11 @@ const membershipSchema = new Schema<IMembership>(
       default: "INR",
       trim: true,
     },
+    planId: {
+      type: String,
+      default: "",
+      trim: true,
+    },
     durationInDays: {
       type: Number,
       default: 30,
@@ -134,7 +139,7 @@ const membershipSchema = new Schema<IMembership>(
   }
 );
 
-membershipSchema.index({ name: 1, role: 1 }, { unique: true });
+membershipSchema.index({ name: 1, role: 1 });
 membershipSchema.index({ price: 1 });
 
 export const Membership = model<IMembership>("Membership", membershipSchema);

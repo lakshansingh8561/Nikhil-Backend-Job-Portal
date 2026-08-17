@@ -19,6 +19,31 @@ export class AuthController {
     );
   });
 
+  static sendOtp = asyncHandler(async (req: Request, res: Response) => {
+    const { email } = req.body;
+    const result = await AuthService.sendRegistrationOtp(email);
+
+    res.status(HTTP_STATUS.OK).json(
+      new ApiResponse(
+        true,
+        result.message,
+        null
+      )
+    );
+  });
+
+  static verifyOtp = asyncHandler(async (req: Request, res: Response) => {
+    const data = await AuthService.verifyOtpAndRegister(req.body);
+
+    res.status(HTTP_STATUS.CREATED).json(
+      new ApiResponse(
+        true,
+        AUTH_MESSAGES.REGISTER_SUCCESS,
+        data
+      )
+    );
+  });
+
   static register = asyncHandler(async (req: Request, res: Response) => {
     const data = await AuthService.register(req.body);
 

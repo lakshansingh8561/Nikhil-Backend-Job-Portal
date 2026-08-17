@@ -19,8 +19,8 @@ export const createPolarCheckoutSchema = z.object({
 
 export const createRazorpaySubscriptionSchema = z.object({
   membershipId: z.string().min(1, "Membership ID is required"),
-  planKey: z.enum(["pro", "premium", "professional", "enterprise"] as const),
-  billingCycle: z.enum(["monthly", "yearly"] as const),
+  planKey: z.enum(["pro", "premium", "professional", "enterprise"] as const).optional(),
+  billingCycle: z.enum(["monthly", "yearly"] as const).optional().default("monthly"),
 });
 
 export const verifyRazorpaySubscriptionSchema = z.object({

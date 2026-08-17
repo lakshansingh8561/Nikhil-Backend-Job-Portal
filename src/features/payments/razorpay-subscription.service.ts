@@ -22,24 +22,13 @@ import { PaymentRepository } from "./payment.repository";
 
 export type PlanKey = "pro" | "premium" | "professional" | "enterprise";
 
-/** Maps plan + billingCycle → Razorpay Plan ID from env */
-const RAZORPAY_PLAN_MAP: Record<string, Record<string, () => string>> = {
-  pro: {
-    monthly: () => env.RAZORPAY_PRO_MONTHLY_PLAN_ID,
-    yearly: () => env.RAZORPAY_PRO_YEARLY_PLAN_ID,
-  },
-  premium: {
-    monthly: () => env.RAZORPAY_PREMIUM_MONTHLY_PLAN_ID,
-    yearly: () => env.RAZORPAY_PREMIUM_YEARLY_PLAN_ID,
-  },
-  professional: {
-    monthly: () => env.RAZORPAY_PRO_MONTHLY_PLAN_ID,
-    yearly: () => env.RAZORPAY_PRO_YEARLY_PLAN_ID,
-  },
-  enterprise: {
-    monthly: () => env.RAZORPAY_PREMIUM_MONTHLY_PLAN_ID,
-    yearly: () => env.RAZORPAY_PREMIUM_YEARLY_PLAN_ID,
-  },
+/** Maps plan name → Razorpay Plan ID from env */
+const RAZORPAY_PLAN_MAP: Record<string, () => string> = {
+  pro: () => env.RAZORPAY_JOBSEEKER_PRO_ID,
+  premium: () => env.RAZORPAY_JOBSEEKER_PREMIUM_ID,
+  professional: () => env.RAZORPAY_RECRUITER_PROFESSIONAL_ID,
+  proffessional: () => env.RAZORPAY_RECRUITER_PROFESSIONAL_ID,
+  enterprise: () => env.RAZORPAY_RECRUITER_ENTERPRISE_ID,
 };
 
 export class RazorpaySubscriptionService {
@@ -57,14 +46,32 @@ export class RazorpaySubscriptionService {
   }
 
   /**
-   * Resolve Razorpay Plan ID:
-   * First checks DB plan.prices for providerPriceIds entry.
-   * If not found, falls back to server env mapping.
+   * Resolve Razorpay Plan ID directly from environment variables or DB prices array
    */
-  static resolveRazorpayPlanId(plan: IMembership, billingCycle: BillingCycle): string {
-    // 1. Check DB prices array
+  static resolveRazorpayPlanId(plan: IMembership, userRole: string, billingCycle?: BillingCycle): string {
+    const planKey = (plan.name || "").toLowerCase();
+    const roleKey = (userRole || "").toLowerCase();
+
+    // 1. Resolve directly by role + plan name
+    if (roleKey.includes("seeker") || roleKey.includes("candidate")) {
+      if (planKey.includes("pro")) return env.RAZORPAY_JOBSEEKER_PRO_ID;
+      if (planKey.includes("premium")) return env.RAZORPAY_JOBSEEKER_PREMIUM_ID;
+    } else {
+      if (planKey.includes("professional") || planKey.includes("proffessional") || planKey.includes("pro")) {
+        return env.RAZORPAY_RECRUITER_PROFESSIONAL_ID;
+      }
+      if (planKey.includes("enterprise")) return env.RAZORPAY_RECRUITER_ENTERPRISE_ID;
+    }
+
+    // Direct planKey lookup fallback
+    if (RAZORPAY_PLAN_MAP[planKey]) {
+      const id = RAZORPAY_PLAN_MAP[planKey]();
+      if (id) return id;
+    }
+
+    // 2. Check DB prices array
     if (plan.prices && plan.prices.length > 0) {
-      const matchPrice = plan.prices.find((p) => p.billingCycle === billingCycle);
+      const matchPrice = plan.prices.find((p) => p.currency === "INR");
       if (matchPrice && matchPrice.providerPriceIds) {
         const providerMatch = matchPrice.providerPriceIds.find(
           (pid) => pid.provider === PaymentProvider.RAZORPAY
@@ -75,17 +82,9 @@ export class RazorpaySubscriptionService {
       }
     }
 
-    // 2. Fall back to env map by plan name (lowercase)
-    const planKey = (plan.name || "").toLowerCase();
-    const resolver = RAZORPAY_PLAN_MAP[planKey]?.[billingCycle];
-    if (resolver) {
-      const envPlanId = resolver();
-      if (envPlanId) return envPlanId;
-    }
-
     throw new ApiError(
       HTTP_STATUS.INTERNAL_SERVER_ERROR,
-      `Razorpay plan ID for ${plan.name}/${billingCycle} is not configured on server or database.`
+      `Razorpay plan ID for ${plan.name} (${userRole}) is not configured in .env or database.`
     );
   }
 
@@ -96,13 +95,14 @@ export class RazorpaySubscriptionService {
     userId: string,
     userRole: string,
     membershipId: string,
-    planKey: string,
-    billingCycle: BillingCycle
+    planKey?: string,
+    billingCycle: BillingCycle = "monthly"
   ) {
     const plan = await Membership.findById(membershipId);
     if (!plan || !plan.isActive || plan.isDeleted) {
       throw new ApiError(HTTP_STATUS.NOT_FOUND, "Membership plan not found or inactive.");
     }
+    const effectivePlanKey = planKey || (plan.name || "").toLowerCase();
 
     const priceDetails = MembershipService.getPlanPriceDetails(plan, billingCycle);
 
@@ -113,7 +113,7 @@ export class RazorpaySubscriptionService {
       );
     }
 
-    const razorpayPlanId = this.resolveRazorpayPlanId(plan, billingCycle);
+    const razorpayPlanId = this.resolveRazorpayPlanId(plan, userRole, billingCycle);
 
     console.log(`[Razorpay] Creating subscription: userId=${userId} plan=${plan.name}/${billingCycle} planId=${razorpayPlanId}`);
 
@@ -123,16 +123,13 @@ export class RazorpaySubscriptionService {
       plan_id: razorpayPlanId,
       total_count: billingCycle === "yearly" ? 12 : 120,
       quantity: 1,
-      notify_info: {
-        notify_phone: "",
-        notify_email: "",
-      },
+      customer_notify: 0,
       notes: {
         userId,
         membershipId: plan._id.toString(),
         userRole,
         planName: plan.name,
-        planKey,
+        planKey: effectivePlanKey,
         billingCycle,
         provider: PaymentProvider.RAZORPAY,
       },

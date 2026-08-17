@@ -122,10 +122,12 @@ export class ApplicationService {
   }
 
   static async getRecruiterAllApplications(recruiterId: string) {
+    const recruiterObjId = Types.ObjectId.isValid(recruiterId) ? new Types.ObjectId(recruiterId) : null;
     const recruiterJobs = await Job.find({
       $or: [
-        { userId: new Types.ObjectId(recruiterId) },
-        { recruiterId: new Types.ObjectId(recruiterId) },
+        { userId: recruiterId },
+        { recruiterId: recruiterId },
+        ...(recruiterObjId ? [{ userId: recruiterObjId }, { recruiterId: recruiterObjId }] : []),
       ],
     }).select("_id");
 
@@ -134,13 +136,12 @@ export class ApplicationService {
     const applications = await Application.find({
       $or: [
         { jobId: { $in: jobIds } },
-        { recruiterId: new Types.ObjectId(recruiterId) },
+        { recruiterId: recruiterId },
+        ...(recruiterObjId ? [{ recruiterId: recruiterObjId }] : []),
       ],
     })
-      .populate("jobId", "title location companyId userId recruiterId")
+      .populate("jobId", "title location companyId userId recruiterId vacancies")
       .populate("userId", "email role")
-      .populate("applicantId", "email role")
-      .populate("candidateId", "email role")
       .sort({ createdAt: -1 })
       .lean();
 
@@ -152,9 +153,9 @@ export class ApplicationService {
           (typeof rawApp.applicantId === "object" && rawApp.applicantId !== null ? rawApp.applicantId._id : rawApp.applicantId) ||
           (typeof rawApp.candidateId === "object" && rawApp.candidateId !== null ? rawApp.candidateId._id : rawApp.candidateId);
 
-        const profile = await UserProfile.findOne({
-          userId: candidateUserId,
-        }).lean();
+        const profile = candidateUserId
+          ? await UserProfile.findOne({ userId: candidateUserId }).lean()
+          : null;
 
         let candidateUser =
           typeof app.userId === "object" && app.userId !== null ? (app.userId as any) : null;
@@ -162,22 +163,45 @@ export class ApplicationService {
           candidateUser = await User.findById(candidateUserId).select("email role").lean();
         }
 
+        const applicantObj = profile
+          ? {
+              _id: profile._id.toString(),
+              userId: candidateUser || { _id: candidateUserId, email: "" },
+              firstName: profile.firstName || "",
+              lastName: profile.lastName || "",
+              phone: profile.phone || "",
+              headline: profile.headline || "",
+              bio: profile.bio || "",
+              currentLocation: (profile as any).currentLocation || profile.location?.city || "",
+              yearsOfExperience: (profile as any).yearsOfExperience || 0,
+              skills: profile.skills || [],
+              resume: (profile as any).resume || rawApp.resumeUrl || rawApp.resume || "",
+            }
+          : {
+              _id: candidateUserId ? candidateUserId.toString() : "",
+              userId: candidateUser || { _id: candidateUserId, email: "" },
+              firstName: candidateUser?.email ? candidateUser.email.split("@")[0] : "Applicant",
+              lastName: "",
+              phone: "",
+              headline: "Candidate",
+              bio: "",
+              currentLocation: "",
+              yearsOfExperience: 0,
+              skills: [],
+              resume: rawApp.resumeUrl || rawApp.resume || "",
+            };
+
         return {
           ...app,
+          resume: rawApp.resumeUrl || rawApp.resume || "",
           userId: candidateUserId || app.userId,
-          applicantProfile: profile
-            ? {
-                firstName: profile.firstName,
-                lastName: profile.lastName,
-                profilePicture: profile.profilePicture || "",
-                headline: profile.headline || "",
-              }
-            : {
-                firstName: candidateUser?.email ? candidateUser.email.split("@")[0] : "Applicant",
-                lastName: "",
-                profilePicture: "",
-                headline: "",
-              },
+          applicantId: applicantObj,
+          applicantProfile: {
+            firstName: applicantObj.firstName,
+            lastName: applicantObj.lastName,
+            profilePicture: (profile as any)?.profilePicture || "",
+            headline: applicantObj.headline,
+          },
         };
       })
     );
@@ -189,9 +213,14 @@ export class ApplicationService {
     recruiterId: string,
     jobId: string
   ) {
+    const recruiterObjId = Types.ObjectId.isValid(recruiterId) ? new Types.ObjectId(recruiterId) : null;
     const job = await Job.findOne({
       _id: jobId,
-      userId: recruiterId,
+      $or: [
+        { userId: recruiterId },
+        { recruiterId: recruiterId },
+        ...(recruiterObjId ? [{ userId: recruiterObjId }, { recruiterId: recruiterObjId }] : []),
+      ],
     });
 
     if (!job) {
@@ -204,36 +233,92 @@ export class ApplicationService {
     const applications = await Application.find({
       jobId,
     })
-      .populate("userId")
-      .sort({
-        createdAt: -1,
-      });
+      .populate("jobId", "title location companyId userId recruiterId vacancies")
+      .populate("userId", "email role")
+      .sort({ createdAt: -1 })
+      .lean();
 
-    for (const app of applications) {
-      const candidateUserId = (app.userId as any)?._id || app.userId;
-      if (candidateUserId) {
-        NotificationService.createNotification({
-          recipientId: candidateUserId.toString(),
-          senderId: recruiterId,
-          type: "APPLICATION_VIEWED",
-          title: "Application Reviewed",
-          message: `Your application for "${job.title}" was reviewed by the recruiter.`,
-          link: "/job-seeker/applications",
-        }).catch(() => null);
+    const result = await Promise.all(
+      applications.map(async (app) => {
+        const rawApp = app as any;
+        const candidateUserId =
+          (typeof app.userId === "object" && app.userId !== null ? (app.userId as any)._id : app.userId) ||
+          (typeof rawApp.applicantId === "object" && rawApp.applicantId !== null ? rawApp.applicantId._id : rawApp.applicantId) ||
+          (typeof rawApp.candidateId === "object" && rawApp.candidateId !== null ? rawApp.candidateId._id : rawApp.candidateId);
 
-        User.findById(candidateUserId).then((applicantUser) => {
-          if (applicantUser?.email) {
+        const profile = candidateUserId
+          ? await UserProfile.findOne({ userId: candidateUserId }).lean()
+          : null;
+
+        let candidateUser =
+          typeof app.userId === "object" && app.userId !== null ? (app.userId as any) : null;
+        if (!candidateUser && candidateUserId) {
+          candidateUser = await User.findById(candidateUserId).select("email role").lean();
+        }
+
+        const applicantObj = profile
+          ? {
+              _id: profile._id.toString(),
+              userId: candidateUser || { _id: candidateUserId, email: "" },
+              firstName: profile.firstName || "",
+              lastName: profile.lastName || "",
+              phone: profile.phone || "",
+              headline: profile.headline || "",
+              bio: profile.bio || "",
+              currentLocation: (profile as any).currentLocation || profile.location?.city || "",
+              yearsOfExperience: (profile as any).yearsOfExperience || 0,
+              skills: profile.skills || [],
+              resume: (profile as any).resume || rawApp.resumeUrl || rawApp.resume || "",
+            }
+          : {
+              _id: candidateUserId ? candidateUserId.toString() : "",
+              userId: candidateUser || { _id: candidateUserId, email: "" },
+              firstName: candidateUser?.email ? candidateUser.email.split("@")[0] : "Applicant",
+              lastName: "",
+              phone: "",
+              headline: "Candidate",
+              bio: "",
+              currentLocation: "",
+              yearsOfExperience: 0,
+              skills: [],
+              resume: rawApp.resumeUrl || rawApp.resume || "",
+            };
+
+        if (candidateUserId) {
+          NotificationService.createNotification({
+            recipientId: candidateUserId.toString(),
+            senderId: recruiterId,
+            type: "APPLICATION_VIEWED",
+            title: "Application Reviewed",
+            message: `Your application for "${job.title}" was reviewed by the recruiter.`,
+            link: "/job-seeker/applications",
+          }).catch(() => null);
+
+          if (candidateUser?.email) {
             EmailService.sendApplicationViewedToJobSeeker({
-              applicantEmail: applicantUser.email,
-              applicantName: applicantUser.email.split("@")[0],
+              applicantEmail: candidateUser.email,
+              applicantName: applicantObj.firstName || candidateUser.email.split("@")[0],
               jobTitle: job.title,
             }).catch(() => null);
           }
-        });
-      }
-    }
+        }
 
-    return applications;
+        return {
+          ...app,
+          resume: rawApp.resumeUrl || rawApp.resume || "",
+          userId: candidateUserId || app.userId,
+          applicantId: applicantObj,
+          applicantProfile: {
+            firstName: applicantObj.firstName,
+            lastName: applicantObj.lastName,
+            profilePicture: (profile as any)?.profilePicture || "",
+            headline: applicantObj.headline,
+          },
+        };
+      })
+    );
+
+    return result;
   }
 
   static async updateStatus(
