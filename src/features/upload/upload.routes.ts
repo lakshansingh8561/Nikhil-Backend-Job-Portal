@@ -36,5 +36,12 @@ router.post(
   UploadController.uploadGeneralFile
 );
 
+// Post attachments (images / video / documents) -> 'Job-portal/Posts'
+router.post(
+  "/post-media",
+  upload.array("files", 10),
+  UploadController.uploadPostMedia
+);
+
 export const uploadRoutes = router;
 export default router;

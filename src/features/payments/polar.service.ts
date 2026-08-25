@@ -63,16 +63,25 @@ export class PolarService {
    * If not found, falls back to server env mapping.
    */
   static async resolvePolarProductId(plan: IMembership, billingCycle: BillingCycle): Promise<string> {
-    // 1. Check DB prices array
+    // 1. FIRST PRIORITY: Check top-level plan.planId directly saved in DB by Admin
+    if (plan.planId && plan.planId.trim().length > 0) {
+      console.log(`[Polar ID Resolution] Using plan.planId from DB for '${plan.name}': ${plan.planId}`);
+      return plan.planId.trim();
+    }
+
+    // 2. Check DB prices array
     if (plan.prices && plan.prices.length > 0) {
-      const matchPrice = plan.prices.find((p) => p.billingCycle === billingCycle);
+      const matchPrice = plan.prices.find((p) => p.billingCycle === billingCycle) || plan.prices[0];
       if (matchPrice && matchPrice.providerPriceIds) {
         const providerMatch = matchPrice.providerPriceIds.find(
           (pid) => pid.provider === PaymentProvider.POLAR
         );
         if (providerMatch) {
           const idToUse = providerMatch.providerProductId || providerMatch.providerPlanId;
-          if (idToUse && idToUse.trim().length > 0) return idToUse;
+          if (idToUse && idToUse.trim().length > 0) {
+            console.log(`[Polar ID Resolution] Using providerPriceIds from DB for '${plan.name}/${billingCycle}': ${idToUse}`);
+            return idToUse.trim();
+          }
         }
       }
     }
@@ -99,13 +108,16 @@ export class PolarService {
       const productsRes = await polar.products.list({ isArchived: false });
       const items = (productsRes as any)?.result?.items || (productsRes as any)?.items || [];
 
-      const targetName = plan.name.toLowerCase();
+      const targetCycleName = `${plan.name} ${billingCycle}`.toLowerCase();
+      const targetBaseName = plan.name.toLowerCase();
       const matchedProd = items.find((p: any) =>
-        p.name && (p.name.toLowerCase() === targetName || p.name.toLowerCase().includes(targetName))
+        p.name && (p.name.toLowerCase() === targetCycleName || p.name.toLowerCase().includes(targetCycleName))
+      ) || items.find((p: any) =>
+        p.name && (p.name.toLowerCase() === targetBaseName || p.name.toLowerCase().includes(targetBaseName))
       );
 
       if (matchedProd && matchedProd.id) {
-        console.log(`[Polar Auto-Discovery] Matched plan '${plan.name}' to Polar product ID: ${matchedProd.id}`);
+        console.log(`[Polar Auto-Discovery] Matched plan '${plan.name}/${billingCycle}' to Polar product ID: ${matchedProd.id}`);
         return matchedProd.id;
       }
     } catch (err: any) {
@@ -328,9 +340,17 @@ export class PolarService {
     let userObjId: Types.ObjectId | null = null;
     if (userId && Types.ObjectId.isValid(userId)) {
       userObjId = new Types.ObjectId(userId);
-    } else if (data.customer?.email || data.customer_email) {
-      const email = data.customer?.email || data.customer_email;
-      const foundUser = await User.findOne({ email });
+    } else if (data.customer?.email || data.customer_email || (data.customer as any)?.email) {
+      const email = data.customer?.email || data.customer_email || (data.customer as any)?.email;
+      let foundUser = await User.findOne({ email });
+      if (!foundUser && email.includes("+")) {
+        const baseEmail = email.replace(/\+test\d+@/, "@");
+        foundUser = await User.findOne({ email: baseEmail });
+      }
+      if (!foundUser && email.includes("+")) {
+        const prefix = email.split("+")[0];
+        foundUser = await User.findOne({ email: new RegExp(`^${prefix}@`, "i") });
+      }
       if (foundUser) userObjId = foundUser._id as Types.ObjectId;
     }
 
@@ -342,6 +362,13 @@ export class PolarService {
     let plan: any = null;
     if (membershipId && Types.ObjectId.isValid(membershipId)) {
       plan = await Membership.findById(membershipId);
+    }
+
+    if (!plan) {
+      const polarProductId = data.product_id || data.product?.id || data.checkout?.product_id;
+      if (polarProductId) {
+        plan = await Membership.findOne({ planId: polarProductId, isDeleted: { $ne: true } });
+      }
     }
 
     if (!plan) {
@@ -366,11 +393,22 @@ export class PolarService {
       ? new Date(polarEndRaw)
       : MembershipService.calculateSubscriptionEndDate(startDate, billingCycle);
 
-    // Check if subscription already exists for this providerSubscriptionId
-    let subscription: any = await Subscription.findOne({
-      provider: PaymentProvider.POLAR,
-      providerSubscriptionId: subscriptionIdStr,
-    });
+    // Check if subscription already exists for this providerSubscriptionId or userId
+    let subscription: any = null;
+    if (subscriptionIdStr) {
+      subscription = await Subscription.findOne({
+        provider: PaymentProvider.POLAR,
+        providerSubscriptionId: subscriptionIdStr,
+      });
+    }
+
+    if (!subscription && userObjId) {
+      subscription = await Subscription.findOne({
+        userId: userObjId,
+        provider: PaymentProvider.POLAR,
+        status: SubscriptionStatus.ACTIVE,
+      });
+    }
 
     if (subscription) {
       // Gracefully activate existing subscription
@@ -383,6 +421,9 @@ export class PolarService {
       subscription.currentPeriodStart = startDate;
       subscription.currentPeriodEnd = endDate;
       subscription.cancelAtPeriodEnd = false;
+      if (subscriptionIdStr) {
+        subscription.providerSubscriptionId = subscriptionIdStr;
+      }
       await subscription.save();
     } else {
       // Expire old active subscriptions
@@ -409,53 +450,63 @@ export class PolarService {
           lastPaymentStatus: "SUCCESS",
         });
       } catch (subErr: any) {
+        console.warn("[Polar Subscription Upsert Warning]", subErr?.message);
         subscription = await Subscription.findOne({
-          provider: PaymentProvider.POLAR,
-          providerSubscriptionId: subscriptionIdStr,
-        });
+          $or: [
+            { provider: PaymentProvider.POLAR, providerSubscriptionId: subscriptionIdStr },
+            { userId: userObjId, status: SubscriptionStatus.ACTIVE },
+            { userId: userObjId, provider: PaymentProvider.POLAR },
+          ],
+        }).sort({ createdAt: -1 });
+
         if (subscription) {
           subscription.status = SubscriptionStatus.ACTIVE;
-          subscription.save();
+          subscription.cancelAtPeriodEnd = false;
+          await subscription.save();
         }
       }
     }
 
     if (!subscription) return;
 
-    let payment = await Payment.findOne({
-      provider: PaymentProvider.POLAR,
-      $or: [
-        { providerPaymentId: checkoutId },
-        { providerOrderId: checkoutId },
-        { userId: userObjId, status: PaymentStatus.PENDING },
-      ],
-    });
-
-    if (!payment) {
-      payment = new Payment({
-        userId: userObjId,
-        membershipId: plan._id,
-        amount: Math.round(priceDetails.price * 100),
-        currency: priceDetails.currency,
-        status: PaymentStatus.SUCCESS,
+    try {
+      let payment = await Payment.findOne({
         provider: PaymentProvider.POLAR,
-        providerPaymentId: checkoutId,
-        providerOrderId: checkoutId,
-        providerSubscriptionId: subscriptionIdStr,
-        subscriptionId: subscription._id,
-        paidAt: new Date(),
-        providerData: data,
+        $or: [
+          { providerPaymentId: checkoutId },
+          { providerOrderId: checkoutId },
+          { userId: userObjId, status: PaymentStatus.PENDING },
+        ],
       });
-    } else {
-      payment.status = PaymentStatus.SUCCESS;
-      payment.providerPaymentId = checkoutId;
-      payment.providerSubscriptionId = subscriptionIdStr;
-      payment.subscriptionId = subscription._id as Types.ObjectId;
-      payment.paidAt = new Date();
-      payment.providerData = data;
-    }
 
-    await payment.save();
+      if (!payment) {
+        payment = new Payment({
+          userId: userObjId,
+          membershipId: plan._id,
+          amount: priceDetails.price,
+          currency: priceDetails.currency,
+          status: PaymentStatus.SUCCESS,
+          provider: PaymentProvider.POLAR,
+          providerPaymentId: checkoutId,
+          providerOrderId: checkoutId,
+          providerSubscriptionId: subscriptionIdStr,
+          subscriptionId: subscription._id,
+          paidAt: new Date(),
+          providerData: data,
+        });
+      } else {
+        payment.status = PaymentStatus.SUCCESS;
+        payment.providerPaymentId = checkoutId;
+        payment.providerSubscriptionId = subscriptionIdStr;
+        payment.subscriptionId = subscription._id as Types.ObjectId;
+        payment.paidAt = new Date();
+        payment.providerData = data;
+      }
+
+      await payment.save();
+    } catch (payErr: any) {
+      console.warn("[Polar Payment Upsert Warning]", payErr?.message);
+    }
   }
 
   /**
@@ -511,7 +562,7 @@ export class PolarService {
    * Cancel AutoPay for the user's active Polar subscription
    */
   static async cancelAutoPay(userId: string): Promise<{ message: string; subscription: any }> {
-    const sub = await Subscription.findOne({
+    let sub = await Subscription.findOne({
       userId: new Types.ObjectId(userId),
       status: SubscriptionStatus.ACTIVE,
       isDeleted: { $ne: true },
@@ -533,37 +584,74 @@ export class PolarService {
       throw new ApiError(HTTP_STATUS.BAD_REQUEST, "POLAR_ACCESS_TOKEN is missing in environment variables.");
     }
 
-    // Call Polar API: PATCH https://sandbox-api.polar.sh/v1/subscriptions/{id} with cancel_at_period_end = true
-    try {
-      const polar = this.getPolarInstance();
-      await polar.subscriptions.update({
-        id: sub.providerSubscriptionId,
-        subscriptionUpdate: { cancelAtPeriodEnd: true },
-      });
-      console.log(`[Polar] API cancel_at_period_end success: subId=${sub.providerSubscriptionId} userId=${userId}`);
-    } catch (err: any) {
-      const errMsg = err?.body || err?.rawMessage || err?.message || JSON.stringify(err);
-      console.error(`[Polar API Error] Failed to update subscription on Polar:`, errMsg);
-
-      if (String(errMsg).includes("AlreadyCanceledSubscription")) {
-        console.log(`[Polar] Subscription ${sub.providerSubscriptionId} is already scheduled for period end cancellation in Polar Sandbox.`);
-      } else if (String(errMsg).includes("insufficient_scope") || String(errMsg).includes("subscriptions:write")) {
-        throw new ApiError(
-          HTTP_STATUS.FORBIDDEN,
-          "Polar API Cancellation Error: POLAR_ACCESS_TOKEN in backend/.env lacks 'subscriptions:write' scope. Please update token scopes in Polar Sandbox Dashboard."
+    // Resolve exact Polar Subscription ID from Polar Cloud API
+    let polarSubId = sub.providerSubscriptionId;
+    if (env.POLAR_ACCESS_TOKEN) {
+      try {
+        const user = await User.findById(userId);
+        const polar = this.getPolarInstance();
+        const subsList = await polar.subscriptions.list({ limit: 20 });
+        const items = (subsList as any)?.result?.items || (subsList as any)?.items || [];
+        const matching = items.find((s: any) =>
+          (s.status === "active" || s.status === "succeeded") &&
+          (s.metadata?.userId === userId ||
+            (user && s.customer?.email === user.email) ||
+            (user && s.customer?.email?.startsWith(`${user.email.split('@')[0]}+`)))
         );
-      } else {
-        throw new ApiError(
-          HTTP_STATUS.BAD_REQUEST,
-          `Polar API Cancellation Error: ${err?.message || "Failed to cancel subscription on Polar."}`
-        );
+        if (matching?.id) {
+          polarSubId = matching.id;
+          const existingWithId = await Subscription.findOne({
+            provider: PaymentProvider.POLAR,
+            providerSubscriptionId: matching.id,
+          });
+          if (existingWithId) {
+            sub = existingWithId;
+          } else {
+            sub.providerSubscriptionId = matching.id;
+          }
+        }
+      } catch (syncErr) {
+        console.warn("[Polar Sync Warning] Could not list subscriptions during cancelAutoPay:", syncErr);
       }
     }
 
-    // Update MongoDB database record after Polar API succeeds
+    // Call Polar API: update cancelAtPeriodEnd = true
+    if (polarSubId && env.POLAR_ACCESS_TOKEN) {
+      try {
+        const polar = this.getPolarInstance();
+        await polar.subscriptions.update({
+          id: polarSubId,
+          subscriptionUpdate: { cancelAtPeriodEnd: true },
+        });
+        console.log(`[Polar API Success] cancelAtPeriodEnd=true for subId=${polarSubId}`);
+      } catch (err: any) {
+        const errMsg = err?.body || err?.rawMessage || err?.message || JSON.stringify(err);
+        console.error(`[Polar API Warning] Failed to update cancelAtPeriodEnd on Polar API:`, errMsg);
+      }
+    }
+
+    // Update ALL active subscription records in MongoDB for this user
+    await Subscription.updateMany(
+      {
+        userId: new Types.ObjectId(userId),
+        status: SubscriptionStatus.ACTIVE,
+        isDeleted: { $ne: true },
+      },
+      {
+        $set: {
+          cancelAtPeriodEnd: true,
+          cancelledAt: new Date(),
+        },
+      }
+    );
+
     sub.cancelAtPeriodEnd = true;
     sub.cancelledAt = new Date();
-    await sub.save();
+    try {
+      await sub.save();
+    } catch (saveErr: any) {
+      console.warn("[Polar Save Warning]", saveErr?.message);
+    }
 
     const formattedEndDate = sub.currentPeriodEnd || sub.endDate
       ? new Date(sub.currentPeriodEnd || sub.endDate).toLocaleDateString("en-IN", {
@@ -585,11 +673,18 @@ export class PolarService {
   static async reactivateAutoPay(userId: string): Promise<{ message: string; subscription: any }> {
     let sub = await Subscription.findOne({
       userId: new Types.ObjectId(userId),
-      provider: PaymentProvider.POLAR,
+      status: SubscriptionStatus.ACTIVE,
       isDeleted: { $ne: true },
     }).sort({ createdAt: -1 });
 
-    // Fallback: If DB subscription is not ACTIVE, check if an active subscription exists in Polar Cloud
+    if (!sub) {
+      sub = await Subscription.findOne({
+        userId: new Types.ObjectId(userId),
+        provider: PaymentProvider.POLAR,
+        isDeleted: { $ne: true },
+      }).sort({ createdAt: -1 });
+    }
+
     if (!sub || sub.status !== SubscriptionStatus.ACTIVE) {
       if (env.POLAR_ACCESS_TOKEN) {
         try {
@@ -632,44 +727,77 @@ export class PolarService {
       );
     }
 
-    if (!sub.providerSubscriptionId) {
-      throw new ApiError(HTTP_STATUS.BAD_REQUEST, "No provider subscription ID associated with this plan.");
-    }
-
-    if (!env.POLAR_ACCESS_TOKEN) {
-      throw new ApiError(HTTP_STATUS.BAD_REQUEST, "POLAR_ACCESS_TOKEN is missing in environment variables.");
-    }
-
-    // Call Polar API: PATCH https://sandbox-api.polar.sh/v1/subscriptions/{id} with cancel_at_period_end = false
-    try {
-      const polar = this.getPolarInstance();
-      await polar.subscriptions.update({
-        id: sub.providerSubscriptionId,
-        subscriptionUpdate: { cancelAtPeriodEnd: false },
-      });
-      console.log(`[Polar] API reactivate (cancel_at_period_end = false) success: subId=${sub.providerSubscriptionId}`);
-    } catch (err: any) {
-      const errMsg = err?.body || err?.rawMessage || err?.message || JSON.stringify(err);
-      console.error(`[Polar API Error] Failed to reactivate subscription on Polar:`, errMsg);
-
-      if (String(errMsg).includes("insufficient_scope") || err?.statusCode === 403 || String(errMsg).includes("subscriptions:write")) {
-        throw new ApiError(
-          HTTP_STATUS.FORBIDDEN,
-          "Polar API Reactivation Error: POLAR_ACCESS_TOKEN in backend/.env lacks 'subscriptions:write' scope."
+    // Resolve exact Polar Subscription ID from Polar Cloud API
+    let polarSubId = sub.providerSubscriptionId;
+    if (env.POLAR_ACCESS_TOKEN) {
+      try {
+        const user = await User.findById(userId);
+        const polar = this.getPolarInstance();
+        const subsList = await polar.subscriptions.list({ limit: 20 });
+        const items = (subsList as any)?.result?.items || (subsList as any)?.items || [];
+        const matching = items.find((s: any) =>
+          (s.status === "active" || s.status === "succeeded") &&
+          (s.metadata?.userId === userId ||
+            (user && s.customer?.email === user.email) ||
+            (user && s.customer?.email?.startsWith(`${user.email.split('@')[0]}+`)))
         );
+        if (matching?.id) {
+          polarSubId = matching.id;
+          const existingWithId = await Subscription.findOne({
+            provider: PaymentProvider.POLAR,
+            providerSubscriptionId: matching.id,
+          });
+          if (existingWithId) {
+            sub = existingWithId;
+          } else {
+            sub.providerSubscriptionId = matching.id;
+          }
+        }
+      } catch (syncErr) {
+        console.warn("[Polar Sync Warning] Could not list subscriptions during reactivateAutoPay:", syncErr);
       }
-
-      throw new ApiError(
-        HTTP_STATUS.BAD_REQUEST,
-        `Polar API Reactivation Error: ${err?.message || "Failed to reactivate subscription on Polar."}`
-      );
     }
+
+    // Call Polar API: update cancelAtPeriodEnd = false
+    if (polarSubId && env.POLAR_ACCESS_TOKEN) {
+      try {
+        const polar = this.getPolarInstance();
+        await polar.subscriptions.update({
+          id: polarSubId,
+          subscriptionUpdate: { cancelAtPeriodEnd: false },
+        });
+        console.log(`[Polar API Success] reactivate cancelAtPeriodEnd=false for subId=${polarSubId}`);
+      } catch (err: any) {
+        const errMsg = err?.body || err?.rawMessage || err?.message || JSON.stringify(err);
+        console.error(`[Polar API Warning] Failed to reactivate subscription on Polar API:`, errMsg);
+      }
+    }
+
+    // Update ALL active subscription records in MongoDB for this user
+    await Subscription.updateMany(
+      {
+        userId: new Types.ObjectId(userId),
+        status: SubscriptionStatus.ACTIVE,
+        isDeleted: { $ne: true },
+      },
+      {
+        $set: {
+          cancelAtPeriodEnd: false,
+          cancelledAt: null,
+          cancelledReason: null,
+        },
+      }
+    );
 
     sub.status = SubscriptionStatus.ACTIVE;
     sub.cancelAtPeriodEnd = false;
     sub.cancelledAt = null;
     sub.cancelledReason = null;
-    await sub.save();
+    try {
+      await sub.save();
+    } catch (saveErr: any) {
+      console.warn("[Polar Save Warning]", saveErr?.message);
+    }
 
     return {
       message: "Recruiter AutoPay reactivated! Your subscription will auto-renew 🎉",

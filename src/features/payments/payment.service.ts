@@ -223,6 +223,7 @@ export class PaymentService {
       currency: priceDetails.currency,
       billingCycle,
       provider: PaymentProvider.RAZORPAY,
+      providerSubscriptionId: payment.providerSubscriptionId || (payment.metadata as any)?.subscriptionId || undefined,
       startDate,
       endDate,
       currentPeriodStart: startDate,

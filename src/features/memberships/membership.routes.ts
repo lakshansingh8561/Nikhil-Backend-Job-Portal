@@ -13,6 +13,7 @@ const router = Router();
  */
 router.get("/", MembershipController.getMemberships);
 router.get("/recruiter", MembershipController.getRecruiterMemberships);
+router.get("/recruiter/plans", MembershipController.getRecruiterMemberships);
 
 /**
  * Protected Job Seeker Routes

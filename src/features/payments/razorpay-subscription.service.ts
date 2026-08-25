@@ -14,7 +14,7 @@ import { Types } from "mongoose";
 import { env } from "../../config/env";
 import { ApiError } from "../../common/utils/ApiError";
 import { HTTP_STATUS } from "../../common/constants/httpStatus";
-import { PaymentProvider, PaymentStatus, SubscriptionStatus } from "../../common/enums";
+import { PaymentProvider, PaymentStatus, SubscriptionStatus, Role } from "../../common/enums";
 import { Membership, Payment, Subscription, BillingCycle, IMembership } from "../../database/models";
 import { MembershipRepository } from "../memberships/membership.repository";
 import { MembershipService } from "../memberships/membership.service";
@@ -49,10 +49,31 @@ export class RazorpaySubscriptionService {
    * Resolve Razorpay Plan ID directly from environment variables or DB prices array
    */
   static resolveRazorpayPlanId(plan: IMembership, userRole: string, billingCycle?: BillingCycle): string {
+    // 1. FIRST PRIORITY: Check top-level plan.planId directly saved in DB by Admin
+    if (plan.planId && plan.planId.trim().length > 0) {
+      console.log(`[Razorpay ID Resolution] Using plan.planId from DB for '${plan.name}': ${plan.planId}`);
+      return plan.planId.trim();
+    }
+
+    // 2. Check DB prices array
+    if (plan.prices && plan.prices.length > 0) {
+      const cycle = billingCycle || "monthly";
+      const matchPrice = plan.prices.find((p) => p.billingCycle === cycle) || plan.prices.find((p) => p.currency === "INR") || plan.prices[0];
+      if (matchPrice && matchPrice.providerPriceIds) {
+        const providerMatch = matchPrice.providerPriceIds.find(
+          (pid) => pid.provider === PaymentProvider.RAZORPAY
+        );
+        if (providerMatch && providerMatch.providerPlanId && providerMatch.providerPlanId.trim().length > 0) {
+          console.log(`[Razorpay ID Resolution] Using providerPriceIds from DB for '${plan.name}': ${providerMatch.providerPlanId}`);
+          return providerMatch.providerPlanId.trim();
+        }
+      }
+    }
+
+    // 3. Fallback to role + plan name env mapping
     const planKey = (plan.name || "").toLowerCase();
     const roleKey = (userRole || "").toLowerCase();
 
-    // 1. Resolve directly by role + plan name
     if (roleKey.includes("seeker") || roleKey.includes("candidate")) {
       if (planKey.includes("pro")) return env.RAZORPAY_JOBSEEKER_PRO_ID;
       if (planKey.includes("premium")) return env.RAZORPAY_JOBSEEKER_PREMIUM_ID;
@@ -67,19 +88,6 @@ export class RazorpaySubscriptionService {
     if (RAZORPAY_PLAN_MAP[planKey]) {
       const id = RAZORPAY_PLAN_MAP[planKey]();
       if (id) return id;
-    }
-
-    // 2. Check DB prices array
-    if (plan.prices && plan.prices.length > 0) {
-      const matchPrice = plan.prices.find((p) => p.currency === "INR");
-      if (matchPrice && matchPrice.providerPriceIds) {
-        const providerMatch = matchPrice.providerPriceIds.find(
-          (pid) => pid.provider === PaymentProvider.RAZORPAY
-        );
-        if (providerMatch && providerMatch.providerPlanId) {
-          return providerMatch.providerPlanId;
-        }
-      }
     }
 
     throw new ApiError(
@@ -98,13 +106,16 @@ export class RazorpaySubscriptionService {
     planKey?: string,
     billingCycle: BillingCycle = "monthly"
   ) {
-    const plan = await Membership.findById(membershipId);
-    if (!plan || !plan.isActive || plan.isDeleted) {
-      throw new ApiError(HTTP_STATUS.NOT_FOUND, "Membership plan not found or inactive.");
-    }
-    const effectivePlanKey = planKey || (plan.name || "").toLowerCase();
+    const upgradeCalc = await MembershipService.calculateProratedUpgrade(
+      userId,
+      userRole as Role,
+      membershipId,
+      billingCycle
+    );
 
-    const priceDetails = MembershipService.getPlanPriceDetails(plan, billingCycle);
+    const plan = upgradeCalc.newPlan;
+    const priceDetails = upgradeCalc.priceDetails;
+    const effectivePlanKey = planKey || (plan.name || "").toLowerCase();
 
     if (priceDetails.price === 0) {
       throw new ApiError(
@@ -289,24 +300,26 @@ export class RazorpaySubscriptionService {
       throw new ApiError(HTTP_STATUS.NOT_FOUND, "No active Razorpay subscription found.");
     }
 
-    if (!sub.providerSubscriptionId) {
-      throw new ApiError(
-        HTTP_STATUS.BAD_REQUEST,
-        "This subscription was not created via Razorpay recurring. Use standard cancel endpoint."
-      );
+    let effectiveSubId = sub.providerSubscriptionId;
+    if (!effectiveSubId && sub.membershipId) {
+      const plan = await Membership.findById(sub.membershipId);
+      if (plan && plan.planId && plan.planId.trim().length > 0) {
+        effectiveSubId = plan.planId.trim();
+        sub.providerSubscriptionId = effectiveSubId;
+      }
     }
 
-    const razorpay = this.getInstance();
-
-    console.log(`[Razorpay] Cancelling subscription: subId=${sub.providerSubscriptionId} cancelAtEnd=${cancelAtPeriodEnd}`);
-
-    try {
-      await (razorpay.subscriptions as any).cancel(
-        sub.providerSubscriptionId,
-        cancelAtPeriodEnd ? 1 : 0
-      );
-    } catch (err: any) {
-      console.warn(`[Razorpay] Warning: Gateway cancel call failed (may already be cancelled): ${err?.message}`);
+    if (effectiveSubId && effectiveSubId.startsWith("sub_")) {
+      try {
+        const razorpay = this.getInstance();
+        console.log(`[Razorpay] Cancelling subscription on gateway: subId=${effectiveSubId} cancelAtEnd=${cancelAtPeriodEnd}`);
+        await (razorpay.subscriptions as any).cancel(
+          effectiveSubId,
+          cancelAtPeriodEnd ? 1 : 0
+        );
+      } catch (err: any) {
+        console.warn(`[Razorpay] Warning: Gateway cancel call failed (may already be cancelled): ${err?.message}`);
+      }
     }
 
     sub.cancelAtPeriodEnd = cancelAtPeriodEnd;
@@ -319,10 +332,67 @@ export class RazorpaySubscriptionService {
 
     await sub.save();
 
+    const endDateFormatted = sub.currentPeriodEnd
+      ? new Date(sub.currentPeriodEnd).toLocaleDateString("en-IN")
+      : sub.endDate
+      ? new Date(sub.endDate).toLocaleDateString("en-IN")
+      : "period end";
+
     return {
       message: cancelAtPeriodEnd
-        ? `Auto-renewal cancelled. Access retained until ${sub.currentPeriodEnd.toLocaleDateString("en-IN")}.`
+        ? `AutoPay cancelled successfully. Paid access remains active until ${endDateFormatted}.`
         : "Subscription cancelled immediately.",
+      subscription: sub,
+    };
+  }
+
+  /**
+   * Reactivate Razorpay AutoPay (sets cancelAtPeriodEnd = false)
+   */
+  static async reactivateAutoPay(userId: string) {
+    const sub = await Subscription.findOne({
+      userId: new Types.ObjectId(userId),
+      status: SubscriptionStatus.ACTIVE,
+      isDeleted: { $ne: true },
+    });
+
+    if (!sub) {
+      throw new ApiError(HTTP_STATUS.NOT_FOUND, "No active subscription found to reactivate.");
+    }
+
+    if (!sub.cancelAtPeriodEnd) {
+      return {
+        message: "AutoPay is already active for this subscription.",
+        subscription: sub,
+      };
+    }
+
+    let effectiveSubId = sub.providerSubscriptionId;
+    if (!effectiveSubId && sub.membershipId) {
+      const plan = await Membership.findById(sub.membershipId);
+      if (plan && plan.planId && plan.planId.trim().length > 0) {
+        effectiveSubId = plan.planId.trim();
+        sub.providerSubscriptionId = effectiveSubId;
+      }
+    }
+
+    if (effectiveSubId && effectiveSubId.startsWith("sub_")) {
+      try {
+        const razorpay = this.getInstance();
+        console.log(`[Razorpay] Reactivating subscription on gateway: subId=${effectiveSubId}`);
+        await (razorpay.subscriptions as any).resume(effectiveSubId).catch(() => null);
+      } catch (err: any) {
+        console.warn(`[Razorpay] Warning: Gateway resume call failed: ${err?.message}`);
+      }
+    }
+
+    sub.cancelAtPeriodEnd = false;
+    sub.cancelledAt = undefined;
+    sub.cancelledReason = undefined;
+    await sub.save();
+
+    return {
+      message: "Razorpay AutoPay reactivated! Your subscription will auto-renew 🎉",
       subscription: sub,
     };
   }

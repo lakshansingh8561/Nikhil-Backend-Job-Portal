@@ -175,6 +175,7 @@ export class PaymentController {
 
     // Detect provider from active subscription
     const { Subscription } = await import("../../database/models");
+    const { PaymentProvider } = await import("../../common/enums");
     const { Types } = await import("mongoose");
     const sub = await Subscription.findOne({
       userId: new Types.ObjectId(userId),
@@ -186,12 +187,13 @@ export class PaymentController {
     }
 
     let result: any;
-    if (sub.providerSubscriptionId?.startsWith("sub_")) {
-      // Razorpay subscription IDs start with sub_
+    if (
+      sub.provider === PaymentProvider.RAZORPAY ||
+      (sub.providerSubscriptionId && sub.providerSubscriptionId.startsWith("sub_"))
+    ) {
       const { RazorpaySubscriptionService } = await import("./razorpay-subscription.service");
       result = await RazorpaySubscriptionService.cancelSubscription(userId, cancelAtPeriodEnd);
     } else {
-      // Default to Polar
       const { PolarService } = await import("./polar.service");
       result = await PolarService.cancelAutoPay(userId);
     }
@@ -204,8 +206,29 @@ export class PaymentController {
   static reactivateAutopay = asyncHandler(async (req: Request, res: Response): Promise<void> => {
     const userId = getUserIdFromReq(req);
 
-    const { PolarService } = await import("./polar.service");
-    const result = await PolarService.reactivateAutoPay(userId);
+    const { Subscription } = await import("../../database/models");
+    const { PaymentProvider } = await import("../../common/enums");
+    const { Types } = await import("mongoose");
+    const sub = await Subscription.findOne({
+      userId: new Types.ObjectId(userId),
+      status: "ACTIVE",
+    });
+
+    if (!sub) {
+      throw new Error("No active subscription found to reactivate.");
+    }
+
+    let result: any;
+    if (
+      sub.provider === PaymentProvider.RAZORPAY ||
+      (sub.providerSubscriptionId && sub.providerSubscriptionId.startsWith("sub_"))
+    ) {
+      const { RazorpaySubscriptionService } = await import("./razorpay-subscription.service");
+      result = await RazorpaySubscriptionService.reactivateAutoPay(userId);
+    } else {
+      const { PolarService } = await import("./polar.service");
+      result = await PolarService.reactivateAutoPay(userId);
+    }
 
     res.status(HTTP_STATUS.OK).json(
       new ApiResponse(true, result.message, result)

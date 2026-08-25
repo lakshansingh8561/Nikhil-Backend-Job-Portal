@@ -7,3 +7,6 @@ export * from "./jobStatus.enum";
 export * from "./paymentProvider.enum";
 export * from "./paymentStatus.enum";
 export * from "./subscriptionStatus.enum";
+export * from "./reactionType.enum";
+export * from "./connectionStatus.enum";
+export * from "./postVisibility.enum";

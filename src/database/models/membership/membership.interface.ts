@@ -27,6 +27,7 @@ export interface IMembershipFeature {
 export interface IMembership extends Document {
   name: string;
   role: Role;
+  billingCycle?: BillingCycle;
   price: number;
   currency: string;
   planId?: string;

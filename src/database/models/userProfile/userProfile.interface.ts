@@ -8,6 +8,8 @@ export interface IUserProfile extends Document {
   headline?: string;
   bio?: string;
   profilePicture?: string;
+  /** Wide banner image shown behind the avatar on the profile hero. */
+  coverPhoto?: string;
   skills: string[];
   gender?: string;
   dateOfBirth?: Date;

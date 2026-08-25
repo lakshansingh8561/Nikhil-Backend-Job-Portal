@@ -40,6 +40,11 @@ const userProfileSchema = new Schema<IUserProfile>(
       default: "",
       trim: true,
     },
+    coverPhoto: {
+      type: String,
+      default: "",
+      trim: true,
+    },
     skills: {
       type: [String],
       default: [],

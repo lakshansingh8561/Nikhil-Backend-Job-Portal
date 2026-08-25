@@ -19,6 +19,18 @@ const startServer = async () => {
     const server = http.createServer(app);
     initSocketServer(server);
 
+    server.on("error", (error: NodeJS.ErrnoException) => {
+      if (error.code === "EADDRINUSE") {
+        console.error(
+          `❌ Port ${env.PORT} is already in use by another process.\n` +
+          `   Run 'npx kill-port ${env.PORT}' or stop the process running on port ${env.PORT}.`
+        );
+      } else {
+        console.error("❌ Server error:", error);
+      }
+      process.exit(1);
+    });
+
     server.listen(env.PORT, () => {
       console.log(`🚀 Server running on http://localhost:${env.PORT}`);
     });
