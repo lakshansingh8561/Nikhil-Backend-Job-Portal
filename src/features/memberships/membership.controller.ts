@@ -13,7 +13,8 @@ export class MembershipController {
   static getMemberships = asyncHandler(
     async (req: Request, res: Response) => {
       const currency = (req.query.currency as "USD" | "INR") || undefined;
-      const plans = await MembershipService.getActiveMemberships(Role.JOB_SEEKER, currency);
+      const billingCycle = (req.query.billingCycle as "monthly" | "yearly") || undefined;
+      const plans = await MembershipService.getActiveMemberships(Role.JOB_SEEKER, currency, billingCycle);
 
       res
         .status(HTTP_STATUS.OK)
@@ -33,7 +34,8 @@ export class MembershipController {
   static getRecruiterMemberships = asyncHandler(
     async (req: Request, res: Response) => {
       const currency = (req.query.currency as "USD" | "INR") || undefined;
-      const plans = await MembershipService.getActiveMemberships(Role.RECRUITER, currency);
+      const billingCycle = (req.query.billingCycle as "monthly" | "yearly") || undefined;
+      const plans = await MembershipService.getActiveMemberships(Role.RECRUITER, currency, billingCycle);
 
       res
         .status(HTTP_STATUS.OK)

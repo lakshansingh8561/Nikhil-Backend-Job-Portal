@@ -78,6 +78,11 @@ const membershipSchema = new Schema<IMembership>(
       default: Role.JOB_SEEKER,
       required: true,
     },
+    billingCycle: {
+      type: String,
+      enum: ["monthly", "yearly"],
+      default: "monthly",
+    },
     price: {
       type: Number,
       required: true,

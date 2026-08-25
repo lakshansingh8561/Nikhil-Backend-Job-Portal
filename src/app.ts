@@ -11,7 +11,14 @@ import { errorMiddleware } from "./common/middlewares/error.middleware";
 
 const app = express();
 
-app.use(helmet());
+// Helmet's default `Cross-Origin-Resource-Policy: same-origin` blocks the
+// browser at :5173 from loading locally-stored media served from :5000, which
+// silently broke every image that fell back to disk instead of Cloudinary.
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+  })
+);
 
 const allowedOrigins = [
   "http://localhost:5173",

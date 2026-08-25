@@ -7,6 +7,7 @@ import {
   DEFAULT_RECRUITER_MEMBERSHIP_PLANS,
   MEMBERSHIP_MESSAGES,
   PLAN_LEVELS,
+  getPlanLevel,
 } from "./membership.constants";
 import { Types } from "mongoose";
 import { Job, Payment, Subscription, Membership, User, IMembership, IMembershipPrice, BillingCycle } from "../../database/models";
@@ -90,15 +91,31 @@ export class MembershipService {
   }
 
   /**
-   * Get all active membership plans by role & target currency (USD vs INR)
+   * Get all active membership plans by role, target currency (USD vs INR), & billing cycle (monthly vs yearly)
    */
-  static async getActiveMemberships(role: Role = Role.JOB_SEEKER, targetCurrency: "USD" | "INR" = "USD") {
-    const query: any = { role, isActive: true, isDeleted: { $ne: true } };
+  static async getActiveMemberships(
+    role: Role = Role.JOB_SEEKER,
+    targetCurrency: "USD" | "INR" = "USD",
+    targetCycle: "monthly" | "yearly" = "monthly"
+  ) {
+    const cycle = targetCycle === "yearly" ? "yearly" : "monthly";
+
+    const query: any = {
+      role,
+      isActive: true,
+      isDeleted: { $ne: true },
+      $or: [
+        { billingCycle: cycle },
+        { price: 0 },
+        { name: "Free" },
+      ],
+    };
+
     const plans = await Membership.find(query).sort({ price: 1 });
 
-    return plans
+    const result = plans
       .filter((planDoc) => {
-        if (planDoc.price === 0) return true;
+        if (planDoc.price === 0 || planDoc.name === "Free") return true;
 
         const curr = planDoc.currency || "USD";
         if (targetCurrency === "INR") {
@@ -108,32 +125,29 @@ export class MembershipService {
         }
       })
       .map((planDoc) => {
-        const plan = planDoc.toObject();
-
-        if (targetCurrency === "INR") {
-          if (plan.currency === "INR") {
-            plan.price = plan.price;
-          } else {
-            const inrPriceObj = plan.prices?.find((p) => p.currency === "INR");
-            if (inrPriceObj) {
-              plan.price = inrPriceObj.price;
-            }
-            plan.currency = "INR";
-          }
+        const obj = planDoc.toObject();
+        if (obj.price > 0 && obj.name !== "Free") {
+          const priceDetails = MembershipService.getPlanPriceDetails(obj, cycle);
+          obj.price = priceDetails.price;
+          obj.durationInDays = priceDetails.durationInDays;
+          obj.billingCycle = priceDetails.billingCycle;
+          if (priceDetails.currency) obj.currency = priceDetails.currency;
         } else {
-          if (plan.currency === "USD") {
-            plan.price = plan.price;
-          } else {
-            const usdPriceObj = plan.prices?.find((p) => p.currency === "USD");
-            if (usdPriceObj) {
-              plan.price = usdPriceObj.price;
-            }
-            plan.currency = "USD";
-          }
+          obj.billingCycle = cycle;
         }
-
-        return plan;
+        return obj;
       });
+
+    // Sort so Free plan (price === 0 or name === "Free") is ALWAYS 1st!
+    result.sort((a, b) => {
+      const aIsFree = a.price === 0 || a.name === "Free";
+      const bIsFree = b.price === 0 || b.name === "Free";
+      if (aIsFree && !bIsFree) return -1;
+      if (!aIsFree && bIsFree) return 1;
+      return a.price - b.price;
+    });
+
+    return result;
   }
 
   /**
@@ -154,13 +168,16 @@ export class MembershipService {
 
     const selectedCurrency = data.currency || "USD";
     const planPrice = Number(data.price || 0);
+    const nameLower = (data.name || "").toLowerCase();
+    const cycle: BillingCycle = data.billingCycle || (nameLower.includes("yearly") || nameLower.includes("annual") || (data.durationInDays && Number(data.durationInDays) >= 365) ? "yearly" : "monthly");
+    const durationInDays = Number(data.durationInDays || (cycle === "yearly" ? 365 : 30));
 
     const prices: IMembershipPrice[] = [
       {
-        billingCycle: "monthly",
+        billingCycle: cycle,
         price: planPrice,
         currency: selectedCurrency,
-        durationInDays: Number(data.durationInDays || 30),
+        durationInDays,
         providerPriceIds: data.planId
           ? [{ provider: PaymentProvider.RAZORPAY, providerPlanId: data.planId }]
           : [],
@@ -169,10 +186,11 @@ export class MembershipService {
 
     const newPlan = await Membership.create({
       ...data,
+      billingCycle: cycle,
       price: planPrice,
       currency: selectedCurrency,
       planId: data.planId || "",
-      durationInDays: Number(data.durationInDays || 30),
+      durationInDays,
       prices,
       isActive: data.isActive !== false,
       isDeleted: false,
@@ -192,13 +210,18 @@ export class MembershipService {
 
     const selectedCurrency = data.currency || plan.currency || "USD";
     const planPrice = data.price !== undefined ? Number(data.price) : plan.price;
+    const nameLower = (data.name || plan.name || "").toLowerCase();
+    const cycle: BillingCycle = data.billingCycle || plan.billingCycle || (nameLower.includes("yearly") || nameLower.includes("annual") || (data.durationInDays && Number(data.durationInDays) >= 365) ? "yearly" : "monthly");
+    const durationInDays = data.durationInDays !== undefined
+      ? Number(data.durationInDays)
+      : (plan.durationInDays || (cycle === "yearly" ? 365 : 30));
 
     const prices: IMembershipPrice[] = [
       {
-        billingCycle: "monthly",
+        billingCycle: cycle,
         price: planPrice,
         currency: selectedCurrency,
-        durationInDays: Number(data.durationInDays || plan.durationInDays || 30),
+        durationInDays,
         providerPriceIds: (data.planId || plan.planId)
           ? [{ provider: PaymentProvider.RAZORPAY, providerPlanId: data.planId || plan.planId || "" }]
           : [],
@@ -207,10 +230,11 @@ export class MembershipService {
 
     Object.assign(plan, {
       ...data,
+      billingCycle: cycle,
       price: planPrice,
       currency: selectedCurrency,
       planId: data.planId !== undefined ? data.planId : plan.planId,
-      durationInDays: data.durationInDays !== undefined ? Number(data.durationInDays) : plan.durationInDays,
+      durationInDays,
       prices,
     });
 
@@ -278,8 +302,7 @@ export class MembershipService {
     const priceDetails = this.getPlanPriceDetails(newPlan, billingCycle);
 
     const currentSub = await MembershipRepository.findActiveSubscription(userId);
-    const roleLevels = PLAN_LEVELS[userRole] || {};
-    const newPlanLevel = roleLevels[newPlan.name] || 1;
+    const newPlanLevel = getPlanLevel(userRole, newPlan.name);
 
     if (!currentSub) {
       return {
@@ -295,13 +318,27 @@ export class MembershipService {
     }
 
     const currentPlanName = currentSub.planName || (currentSub.membershipId as any)?.name || "";
-    const currentPlanLevel = roleLevels[currentPlanName] || 1;
+    const currentPlanLevel = getPlanLevel(userRole, currentPlanName);
+
+    const currentSubCycle = currentSub.billingCycle ||
+      (currentSub.membershipId as any)?.billingCycle ||
+      (currentPlanName.toLowerCase().includes("yearly") ? "yearly" : "monthly");
+
+    const targetCycle = billingCycle ||
+      newPlan.billingCycle ||
+      (newPlan.name.toLowerCase().includes("yearly") ? "yearly" : "monthly");
 
     if (currentPlanLevel === newPlanLevel) {
-      if (currentSub.billingCycle === billingCycle && !currentSub.cancelAtPeriodEnd) {
+      if (currentSubCycle === targetCycle && !currentSub.cancelAtPeriodEnd) {
         throw new ApiError(
           HTTP_STATUS.BAD_REQUEST,
           MEMBERSHIP_MESSAGES.SAME_PLAN_ACTIVE
+        );
+      }
+      if (currentSubCycle === "yearly" && targetCycle === "monthly") {
+        throw new ApiError(
+          HTTP_STATUS.BAD_REQUEST,
+          MEMBERSHIP_MESSAGES.HIGHER_PLAN_ACTIVE
         );
       }
     }
@@ -346,6 +383,36 @@ export class MembershipService {
   static async getCurrentSubscription(userId: string) {
     await this.expireOverdueSubscriptions(userId);
     let subscription = await MembershipRepository.findActiveSubscription(userId);
+
+    // Fallback: If DB subscription is missing or inactive, sync with Polar Sandbox API
+    if (!subscription && env.POLAR_ACCESS_TOKEN) {
+      try {
+        const { PolarService } = await import("../payments/polar.service");
+        const user = await User.findById(userId);
+        const polar = PolarService.getPolarInstance();
+        const subsList = await polar.subscriptions.list({ limit: 20 });
+        const items = (subsList as any)?.result?.items || (subsList as any)?.items || [];
+
+        const matchingSub = items.find((s: any) =>
+          (s.status === "active" || s.status === "succeeded") &&
+          (s.metadata?.userId === userId ||
+            (user && s.customer?.email === user.email) ||
+            (user && s.customer?.email?.startsWith(`${user.email.split('@')[0]}+`)))
+        );
+
+        if (matchingSub) {
+          await PolarService.processSubscriptionActivation({
+            checkout_id: matchingSub.id,
+            customer_external_id: userId,
+            subscription_id: matchingSub.id,
+            metadata: matchingSub.metadata,
+          });
+          subscription = await MembershipRepository.findActiveSubscription(userId);
+        }
+      } catch (polarSyncErr) {
+        console.warn("[Polar Sync Warning] Failed to sync active job seeker sub from Polar API:", polarSyncErr);
+      }
+    }
 
     if (!subscription) {
       const freePlan = await MembershipRepository.findActiveMemberships(Role.JOB_SEEKER)

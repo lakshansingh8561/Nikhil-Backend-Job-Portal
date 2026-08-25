@@ -17,6 +17,18 @@ const getCloudinaryInstance = () => {
   return cloudinary;
 };
 
+export interface UploadedMedia {
+  url: string;
+  public_id: string;
+  width?: number;
+  height?: number;
+  bytes?: number;
+  format?: string;
+  resourceType?: string;
+  mimeType?: string;
+  fileName?: string;
+}
+
 export class CloudinaryService {
   /**
    * Save file buffer to local disk ('uploads/profile-images' or 'uploads/resumes')
@@ -116,6 +128,63 @@ export class CloudinaryService {
           resolve({
             url: result.secure_url,
             public_id: result.public_id,
+          });
+        }
+      );
+
+      Readable.from(fileBuffer).pipe(uploadStream);
+    });
+  }
+
+  /**
+   * Upload any post attachment to Cloudinary folder 'Job-portal/Posts'.
+   *
+   * Uses `resource_type: "auto"` so images, video and raw documents all work
+   * through one path — the previous post flow reused `uploadProfileImage`,
+   * which is hardcoded to `resource_type: "image"` and therefore silently
+   * rejected video and PDF attachments.
+   */
+  static async uploadPostMedia(
+    fileBuffer: Buffer,
+    fileName?: string,
+    mimeType?: string
+  ): Promise<UploadedMedia> {
+    const instance = getCloudinaryInstance();
+
+    return new Promise((resolve) => {
+      const uploadStream = instance.uploader.upload_stream(
+        {
+          folder: "Job-portal/Posts",
+          resource_type: "auto",
+          type: "upload",
+          use_filename: true,
+          unique_filename: true,
+        },
+        async (error, result) => {
+          if (error || !result) {
+            console.warn("⚠️ Cloudinary post media upload returned error:", error?.message || error);
+            console.log("ℹ️ Falling back to local storage so the attachment still renders...");
+            const fallback = await CloudinaryService.saveToLocalDisk(fileBuffer, "posts", fileName);
+            return resolve({
+              url: fallback.url,
+              public_id: fallback.public_id,
+              bytes: fileBuffer.byteLength,
+              mimeType,
+              fileName,
+            });
+          }
+
+          console.log("🎉 Cloudinary post media uploaded successfully:", result.secure_url);
+          resolve({
+            url: result.secure_url,
+            public_id: result.public_id,
+            width: result.width,
+            height: result.height,
+            bytes: result.bytes ?? fileBuffer.byteLength,
+            format: result.format,
+            resourceType: result.resource_type,
+            mimeType,
+            fileName,
           });
         }
       );

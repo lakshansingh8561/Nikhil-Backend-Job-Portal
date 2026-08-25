@@ -12,6 +12,8 @@ import { locationRoutes } from "../features/location";
 import { membershipRoutes } from "../features/memberships";
 import { paymentRoutes } from "../features/payments";
 import { uploadRoutes } from "../features/upload/upload.routes";
+import postsRoutes from "../features/posts/posts.routes";
+import networkRoutes from "../features/network/network.routes";
 
 const router = Router();
 
@@ -28,5 +30,7 @@ router.use("/location", locationRoutes);
 router.use("/memberships", membershipRoutes);
 router.use("/payments", paymentRoutes);
 router.use("/upload", uploadRoutes);
+router.use("/posts", postsRoutes);
+router.use("/network", networkRoutes);
 
 export default router;

@@ -12,3 +12,8 @@ export * from "./membership";
 export * from "./subscription";
 export * from "./payment";
 export * from "./otp";
+export * from "./post";
+export * from "./comment";
+export * from "./connection";
+export * from "./follow";
+export * from "./savedPost";

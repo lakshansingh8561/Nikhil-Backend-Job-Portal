@@ -36,7 +36,14 @@ export class EmailService {
   public static async sendMail({ to, subject, html, text }: SendMailOptions): Promise<boolean> {
     try {
       if (!to) return false;
-      
+
+      // Master kill switch for local testing — set EMAIL_DISABLED=true in .env
+      // and nothing leaves the machine, whatever calls this.
+      if (String(process.env.EMAIL_DISABLED || "").toLowerCase() === "true") {
+        console.log(`[EmailService] Suppressed (EMAIL_DISABLED=true) → ${to} | ${subject}`);
+        return false;
+      }
+
       const plainText = text || html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
       const transporter = this.getTransporter();
 
@@ -470,7 +477,17 @@ export class EmailService {
     actionType: "SIGNUP" | "LOGIN";
     userFullName?: string;
   }) {
-    const adminEmail = process.env.ADMIN_NOTIFY_EMAIL || process.env.EMAIL_USER || "lakshansingh8561@gmail.com";
+    // Disabled by default: signup/login alerts flooded the admin inbox during
+    // testing. Set ADMIN_NOTIFY_ENABLED=true in .env to turn them back on.
+    if (String(process.env.ADMIN_NOTIFY_ENABLED || "").toLowerCase() !== "true") {
+      console.log(
+        `[EmailService] Admin alert suppressed (ADMIN_NOTIFY_ENABLED is off): ${actionType} ${userEmail}`
+      );
+      return false;
+    }
+
+    const adminEmail = process.env.ADMIN_NOTIFY_EMAIL || process.env.EMAIL_USER || "";
+    if (!adminEmail) return false;
     const actionLabel = actionType === "SIGNUP" ? "🆕 New User Registration" : "🔑 User Login Event";
     const subject = `[JobBox Admin Alert] ${actionLabel}: ${userEmail} (${role})`;
 

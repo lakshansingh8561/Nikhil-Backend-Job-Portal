@@ -19,6 +19,21 @@ export const errorMiddleware = (
   } else if (err.name === "CastError") {
     statusCode = HTTP_STATUS.BAD_REQUEST;
     message = `Invalid ID parameter format for ${err.path}: ${err.value}`;
+  } else if (err.name === "MulterError") {
+    // Upload rejections are the user's fault, not a server fault — surface a
+    // readable 400 instead of the generic 500 the raw MulterError produced.
+    statusCode = HTTP_STATUS.BAD_REQUEST;
+    if (err.code === "LIMIT_FILE_SIZE") {
+      message = "That file is too large. The maximum upload size is 15 MB.";
+    } else if (err.code === "LIMIT_FILE_COUNT" || err.code === "LIMIT_UNEXPECTED_FILE") {
+      message = "Too many files. You can attach up to 10 files to a post.";
+    } else {
+      message = `Upload failed: ${err.message}`;
+    }
+  } else if (err.code === 11000) {
+    // Duplicate key — e.g. a second invitation for the same pair.
+    statusCode = HTTP_STATUS.CONFLICT;
+    message = "That record already exists.";
   }
 
   console.error(`[ErrorMiddleware] Path: ${req.path} | Status: ${statusCode} | Message: ${message}`, err);

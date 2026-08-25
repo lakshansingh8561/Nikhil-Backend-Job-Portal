@@ -25,13 +25,36 @@ export const PLAN_LEVELS: Record<string, Record<string, number>> = {
   [Role.JOB_SEEKER]: {
     Free: 1,
     Pro: 2,
+    "Pro Yearly": 2,
+    "Pro Monthly": 2,
     Premium: 3,
+    "Premium Yearly": 3,
+    "Premium Monthly": 3,
   },
   [Role.RECRUITER]: {
     Free: 1,
     Professional: 2,
+    "Professional Yearly": 2,
+    "Professional Monthly": 2,
     Enterprise: 3,
+    "Enterprise Yearly": 3,
+    "Enterprise Monthly": 3,
   },
+};
+
+export const getPlanLevel = (role: Role | string, planName: string): number => {
+  const name = (planName || "").toLowerCase();
+
+  if (role === Role.RECRUITER) {
+    if (name.includes("enterprise")) return 3;
+    if (name.includes("professional") || name.includes("pro")) return 2;
+    return 1;
+  }
+
+  // Default: JOB_SEEKER
+  if (name.includes("premium")) return 3;
+  if (name.includes("pro") || name.includes("professional")) return 2;
+  return 1;
 };
 
 export const DEFAULT_MEMBERSHIP_PLANS = [
