@@ -23,7 +23,10 @@ export class EmailService {
       tls: {
         rejectUnauthorized: false,
       },
-    });
+      connectionTimeout: 4000,
+      greetingTimeout: 4000,
+      socketTimeout: 4000,
+    } as any);
   }
 
   private static get fromEmail() {
@@ -47,17 +50,30 @@ export class EmailService {
       const plainText = text || html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
       const transporter = this.getTransporter();
 
-      const info = await transporter.sendMail({
+      const timeoutPromise = new Promise<boolean>((resolve) => {
+        setTimeout(() => {
+          console.warn(`[EmailService] Email dispatch timed out (4s limit) for ${to}`);
+          resolve(false);
+        }, 4000);
+      });
+
+      const sendPromise = transporter.sendMail({
         from: `"JobBox Portal" <${this.fromEmail}>`,
         to,
         subject,
         text: plainText,
         html,
+      }).then((info) => {
+        console.log(`[EmailService] Email sent successfully to ${to}. MessageId: ${info.messageId}`);
+        return true;
+      }).catch((error) => {
+        console.error(`[EmailService] Error sending email to ${to}:`, error);
+        return false;
       });
-      console.log(`[EmailService] Email sent successfully to ${to}. MessageId: ${info.messageId}`);
-      return true;
+
+      return await Promise.race([sendPromise, timeoutPromise]);
     } catch (error) {
-      console.error(`[EmailService] Error sending email to ${to}:`, error);
+      console.error(`[EmailService] Unexpected error sending email to ${to}:`, error);
       return false;
     }
   }

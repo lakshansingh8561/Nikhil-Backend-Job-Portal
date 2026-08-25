@@ -60,7 +60,7 @@ export class ApplicationService {
     const companyName = (job.companyId as any)?.name || "Hiring Company";
 
     if (applicantUser?.email) {
-      await EmailService.sendApplicationConfirmationToJobSeeker({
+      EmailService.sendApplicationConfirmationToJobSeeker({
         applicantEmail: applicantUser.email,
         applicantName: applicantFullName,
         jobTitle: job.title,
@@ -79,28 +79,28 @@ export class ApplicationService {
     }
 
     if (recruiterUserId) {
-      const recruiterUser = await User.findById(recruiterUserId);
+      User.findById(recruiterUserId).then((recruiterUser) => {
+        NotificationService.createNotification({
+          recipientId: recruiterUserId!.toString(),
+          senderId: userId,
+          type: "APPLICATION_SUBMITTED",
+          title: "New Applicant Received",
+          message: `${applicantFullName} applied for "${job.title}".`,
+          link: `/recruiter/jobs/${jobId}/applications`,
+        }).catch(() => null);
 
-      await NotificationService.createNotification({
-        recipientId: recruiterUserId.toString(),
-        senderId: userId,
-        type: "APPLICATION_SUBMITTED",
-        title: "New Applicant Received",
-        message: `${applicantFullName} applied for "${job.title}".`,
-        link: `/recruiter/jobs/${jobId}/applications`,
-      }).catch(() => null);
-
-      if (recruiterUser?.email) {
-        await EmailService.sendApplicationSubmittedToRecruiter({
-          recruiterEmail: recruiterUser.email,
-          recruiterName: recruiterUser.email.split("@")[0] || "Hiring Manager",
-          applicantName: applicantFullName,
-          applicantEmail: applicantUser?.email || "",
-          jobTitle: job.title,
-          companyName,
-          coverLetter: payload.coverLetter,
-        }).catch((err) => console.error("[EmailService] Recruiter application notification failed:", err));
-      }
+        if (recruiterUser?.email) {
+          EmailService.sendApplicationSubmittedToRecruiter({
+            recruiterEmail: recruiterUser.email,
+            recruiterName: recruiterUser.email.split("@")[0] || "Hiring Manager",
+            applicantName: applicantFullName,
+            applicantEmail: applicantUser?.email || "",
+            jobTitle: job.title,
+            companyName,
+            coverLetter: payload.coverLetter,
+          }).catch((err) => console.error("[EmailService] Recruiter application notification failed:", err));
+        }
+      }).catch((err) => console.error("Recruiter lookup failed for email notification:", err));
     }
 
     return application;
@@ -387,7 +387,7 @@ export class ApplicationService {
     if (candidateUser?.email) {
       const companyName = (job.companyId as any)?.name || "Hiring Company";
       
-      await EmailService.sendStatusUpdateToJobSeeker({
+      EmailService.sendStatusUpdateToJobSeeker({
         applicantEmail: candidateUser.email,
         applicantName,
         jobTitle: job.title,
