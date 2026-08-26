@@ -37,6 +37,16 @@ router.post(
   AuthController.googleAuth
 );
 
+router.post(
+  "/forgot-password/send-otp",
+  AuthController.sendForgotPasswordOtp
+);
+
+router.post(
+  "/forgot-password/reset",
+  AuthController.resetPasswordWithOtp
+);
+
 /**
  * Protected Routes
  */

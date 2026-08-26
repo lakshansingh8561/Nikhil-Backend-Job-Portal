@@ -93,9 +93,14 @@ export class JobSeekerService {
     }
 
     const userProf = await UserProfile.findOne({ userId });
-    const profileObj = profile.toObject();
-    if (userProf?.profilePicture) {
-      profileObj.profilePicture = userProf.profilePicture;
+    const profileObj: any = profile.toObject();
+    if (userProf) {
+      profileObj.skills = userProf.skills || [];
+      profileObj.headline = userProf.headline || "";
+      profileObj.bio = userProf.bio || "";
+      if (userProf.profilePicture) {
+        profileObj.profilePicture = userProf.profilePicture;
+      }
     }
 
     return profileObj;
@@ -213,17 +218,32 @@ export class JobSeekerService {
       );
     }
 
-    if (sanitizedPayload.profilePicture) {
+    const userProfileUpdates: any = {};
+    if (sanitizedPayload.firstName !== undefined) userProfileUpdates.firstName = sanitizedPayload.firstName;
+    if (sanitizedPayload.lastName !== undefined) userProfileUpdates.lastName = sanitizedPayload.lastName;
+    if (sanitizedPayload.phone !== undefined) userProfileUpdates.phone = sanitizedPayload.phone;
+    if (sanitizedPayload.headline !== undefined) userProfileUpdates.headline = sanitizedPayload.headline;
+    if (sanitizedPayload.bio !== undefined) userProfileUpdates.bio = sanitizedPayload.bio;
+    if (sanitizedPayload.skills !== undefined) userProfileUpdates.skills = sanitizedPayload.skills;
+    if (sanitizedPayload.profilePicture !== undefined) userProfileUpdates.profilePicture = sanitizedPayload.profilePicture;
+
+    if (Object.keys(userProfileUpdates).length > 0) {
       await UserProfile.findOneAndUpdate(
         { userId },
-        { $set: { profilePicture: sanitizedPayload.profilePicture } },
+        { $set: userProfileUpdates },
         { new: true, upsert: true }
       );
     }
 
-    const profileObj = profile.toObject();
-    if (sanitizedPayload.profilePicture) {
-      profileObj.profilePicture = sanitizedPayload.profilePicture;
+    const userProf = await UserProfile.findOne({ userId });
+    const profileObj: any = profile.toObject();
+    if (userProf) {
+      profileObj.skills = userProf.skills || [];
+      profileObj.headline = userProf.headline || "";
+      profileObj.bio = userProf.bio || "";
+      if (userProf.profilePicture) {
+        profileObj.profilePicture = userProf.profilePicture;
+      }
     }
 
     return profileObj;

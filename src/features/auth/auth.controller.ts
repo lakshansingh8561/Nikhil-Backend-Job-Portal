@@ -118,4 +118,29 @@ export class AuthController {
       )
     );
   });
+
+  static sendForgotPasswordOtp = asyncHandler(async (req: Request, res: Response) => {
+    const { email } = req.body;
+    const result = await AuthService.sendForgotPasswordOtp(email);
+
+    res.status(HTTP_STATUS.OK).json(
+      new ApiResponse(
+        true,
+        result.message,
+        null
+      )
+    );
+  });
+
+  static resetPasswordWithOtp = asyncHandler(async (req: Request, res: Response) => {
+    const result = await AuthService.resetPasswordWithOtp(req.body);
+
+    res.status(HTTP_STATUS.OK).json(
+      new ApiResponse(
+        true,
+        result.message,
+        null
+      )
+    );
+  });
 }
