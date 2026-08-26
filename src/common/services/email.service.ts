@@ -8,14 +8,22 @@ export interface SendMailOptions {
 }
 
 export class EmailService {
+  private static transporterInstance: nodemailer.Transporter | null = null;
+
   private static getTransporter() {
+    if (this.transporterInstance) {
+      return this.transporterInstance;
+    }
+
     const rawUser = (process.env.EMAIL_USER || "lakshansingh8561@gmail.com").trim();
     const rawPass = (process.env.EMAIL_PASS || "fhjy uzti gwop lfsq").replace(/\s+/g, "");
 
-    return nodemailer.createTransport({
+    this.transporterInstance = nodemailer.createTransport({
       host: "smtp.gmail.com",
       port: 465,
       secure: true,
+      pool: true,
+      maxConnections: 5,
       auth: {
         user: rawUser,
         pass: rawPass,
@@ -23,10 +31,12 @@ export class EmailService {
       tls: {
         rejectUnauthorized: false,
       },
-      connectionTimeout: 4000,
-      greetingTimeout: 4000,
-      socketTimeout: 4000,
+      connectionTimeout: 25000,
+      greetingTimeout: 25000,
+      socketTimeout: 25000,
     } as any);
+
+    return this.transporterInstance;
   }
 
   private static get fromEmail() {
@@ -52,9 +62,9 @@ export class EmailService {
 
       const timeoutPromise = new Promise<boolean>((resolve) => {
         setTimeout(() => {
-          console.warn(`[EmailService] Email dispatch timed out (4s limit) for ${to}`);
+          console.warn(`[EmailService] Email dispatch timed out (25s limit) for ${to}`);
           resolve(false);
-        }, 4000);
+        }, 25000);
       });
 
       const sendPromise = transporter.sendMail({
@@ -620,6 +630,125 @@ export class EmailService {
 
             <div class="message" style="font-size: 12px; color: #94A3B8;">
               If you did not request this email, please ignore it or contact our support team.
+            </div>
+          </div>
+          <div class="footer">
+            © ${new Date().getFullYear()} JobBox Recruitment Platform. All rights reserved.
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    return this.sendMail({ to: email, subject, html });
+  }
+
+  /**
+   * 15. Send Password Reset OTP Email
+   */
+  public static async sendForgotPasswordOtp({
+    email,
+    otp,
+  }: {
+    email: string;
+    otp: string;
+  }): Promise<boolean> {
+    const subject = `🔑 ${otp} is your JobBox Password Reset Verification Code`;
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f5f7fc; margin: 0; padding: 0; }
+          .container { max-width: 580px; margin: 30px auto; background: #ffffff; border-radius: 20px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.06); border: 1px solid #eaeff7; }
+          .header { background: linear-gradient(135deg, #4F46E5 0%, #3B82F6 100%); padding: 36px 24px; text-align: center; color: #ffffff; }
+          .header h1 { margin: 0; font-size: 26px; font-weight: 900; letter-spacing: -0.5px; }
+          .header p { margin: 6px 0 0; font-size: 13px; opacity: 0.9; font-weight: 500; }
+          .content { padding: 36px 28px; color: #05264E; text-align: center; }
+          .greeting { font-size: 18px; font-weight: 800; margin-bottom: 12px; color: #05264E; text-align: left; }
+          .message { font-size: 14px; line-height: 1.6; color: #66789c; margin-bottom: 28px; text-align: left; }
+          .otp-card { background: #F8FAFC; border-radius: 16px; padding: 28px 20px; border: 2px dashed #4F46E5; margin: 24px 0; text-align: center; }
+          .otp-label { font-size: 11px; font-weight: 800; color: #66789C; text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 10px; }
+          .otp-code { font-size: 38px; font-weight: 900; color: #4F46E5; letter-spacing: 8px; font-family: monospace; }
+          .expiry-note { font-size: 12px; color: #94A3B8; margin-top: 10px; font-weight: 600; }
+          .footer { background: #f8fafc; padding: 20px; text-align: center; font-size: 12px; color: #94a3b8; border-top: 1px solid #eaeff7; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>JobBox Security</h1>
+            <p>Password Reset Request</p>
+          </div>
+          <div class="content">
+            <div class="greeting">Reset your password</div>
+            <div class="message">
+              We received a request to reset the password for your JobBox account. Please use the 6-digit verification code below to set a new password. This code will expire in <strong>10 minutes</strong>.
+            </div>
+
+            <div class="otp-card">
+              <div class="otp-label">Password Reset Verification Code</div>
+              <div class="otp-code">${otp}</div>
+              <div class="expiry-note">Valid for 10 minutes • Do not share this code with anyone</div>
+            </div>
+
+            <div class="message" style="font-size: 12px; color: #94A3B8;">
+              If you did not request a password reset, please ignore this email or contact support immediately to secure your account.
+            </div>
+          </div>
+          <div class="footer">
+            © ${new Date().getFullYear()} JobBox Recruitment Platform. All rights reserved.
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    return this.sendMail({ to: email, subject, html });
+  }
+
+  /**
+   * 16. Send Password Changed Notification Email
+   */
+  public static async sendPasswordChangedNotification({
+    email,
+  }: {
+    email: string;
+  }): Promise<boolean> {
+    const subject = `🛡️ Your JobBox Password Was Reset Successfully`;
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f5f7fc; margin: 0; padding: 0; }
+          .container { max-width: 580px; margin: 30px auto; background: #ffffff; border-radius: 20px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.06); border: 1px solid #eaeff7; }
+          .header { background: linear-gradient(135deg, #10B981 0%, #059669 100%); padding: 36px 24px; text-align: center; color: #ffffff; }
+          .header h1 { margin: 0; font-size: 26px; font-weight: 900; letter-spacing: -0.5px; }
+          .header p { margin: 6px 0 0; font-size: 13px; opacity: 0.9; font-weight: 500; }
+          .content { padding: 36px 28px; color: #05264E; }
+          .greeting { font-size: 18px; font-weight: 800; margin-bottom: 12px; color: #05264E; }
+          .message { font-size: 14px; line-height: 1.6; color: #66789c; margin-bottom: 20px; }
+          .footer { background: #f8fafc; padding: 20px; text-align: center; font-size: 12px; color: #94a3b8; border-top: 1px solid #eaeff7; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>JobBox Security</h1>
+            <p>Account Security Notification</p>
+          </div>
+          <div class="content">
+            <div class="greeting">Password Reset Confirmed</div>
+            <div class="message">
+              Your JobBox password was successfully reset on ${new Date().toLocaleString()}. You can now log into your account using your new password.
+            </div>
+            <div class="message" style="font-size: 12px; color: #EF4444; font-weight: 600;">
+              If you did not perform this change, please reset your password immediately or contact our security team.
             </div>
           </div>
           <div class="footer">

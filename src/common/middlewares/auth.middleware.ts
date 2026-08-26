@@ -51,3 +51,29 @@ export const authenticate = async (
     next(error);
   }
 };
+
+export const optionalAuthenticate = async (
+  req: Request,
+  _res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const authHeader = req.headers.authorization;
+
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      const token = authHeader.split(" ")[1];
+      const payload = verifyAccessToken(token);
+
+      const user = await User.findById(payload.userId);
+      if (user && user.status !== UserStatus.BLOCKED) {
+        (req as any).user = {
+          userId: user.id,
+          role: user.role,
+        };
+      }
+    }
+  } catch (e) {
+    // Ignore invalid token for optional auth routes
+  }
+  next();
+};

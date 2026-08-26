@@ -24,6 +24,9 @@ export interface IJobSeekerProfile extends Document {
   resumeUrl?: string;
   resume?: string;
   profilePicture?: string;
+  headline?: string;
+  bio?: string;
+  skills?: string[];
   yearsOfExperience: number;
   expectedSalary?: number;
   noticePeriodDays?: number;
