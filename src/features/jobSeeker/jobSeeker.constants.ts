@@ -10,3 +10,4 @@ export const JOB_SEEKER_MESSAGES = {
   PROFILE_NOT_FOUND:
     "Job seeker profile not found.",
 } as const;
+
