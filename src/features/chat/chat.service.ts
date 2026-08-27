@@ -132,27 +132,31 @@ export class ChatService {
     const recruiterId = userRole === Role.RECRUITER ? userId : recipientId;
     const jobSeekerId = userRole === Role.JOB_SEEKER ? userId : recipientId;
 
+    const uId = new Types.ObjectId(userId);
+    const rId = new Types.ObjectId(recipientId);
+
     let conversation = await Conversation.findOne({
       $or: [
-        { participants: { $all: [new Types.ObjectId(userId), new Types.ObjectId(recipientId)] } },
-        { "members.userId": { $all: [new Types.ObjectId(userId), new Types.ObjectId(recipientId)] } },
-        { recruiter: new Types.ObjectId(recruiterId), jobSeeker: new Types.ObjectId(jobSeekerId) },
-        { recruiter: new Types.ObjectId(userId), jobSeeker: new Types.ObjectId(recipientId) },
-        { recruiter: new Types.ObjectId(recipientId), jobSeeker: new Types.ObjectId(userId) },
+        { participants: { $all: [uId, rId] } },
+        { participants: { $all: [userId.toString(), recipientId.toString()] } },
+        { "members.userId": { $all: [uId, rId] } },
+        { "members.userId": { $all: [userId.toString(), recipientId.toString()] } },
+        { recruiter: uId, jobSeeker: rId },
+        { recruiter: rId, jobSeeker: uId },
       ],
       isDeleted: { $ne: true },
-    });
+    }).sort({ lastMessageAt: -1, updatedAt: -1 });
 
     if (!conversation) {
       conversation = await Conversation.create({
         type: "DIRECT",
-        createdBy: new Types.ObjectId(userId),
+        createdBy: uId,
         recruiter: new Types.ObjectId(recruiterId),
         jobSeeker: new Types.ObjectId(jobSeekerId),
-        participants: [new Types.ObjectId(userId), new Types.ObjectId(recipientId)],
+        participants: [uId, rId],
         members: [
-          { userId: new Types.ObjectId(userId), joinedAt: new Date() },
-          { userId: new Types.ObjectId(recipientId), joinedAt: new Date() },
+          { userId: uId, joinedAt: new Date() },
+          { userId: rId, joinedAt: new Date() },
         ],
         jobId: data.jobId ? new Types.ObjectId(data.jobId) : null,
       });
@@ -176,6 +180,8 @@ export class ChatService {
       $or: [
         { participants: new Types.ObjectId(userId) },
         { "members.userId": new Types.ObjectId(userId) },
+        { recruiter: new Types.ObjectId(userId) },
+        { jobSeeker: new Types.ObjectId(userId) },
       ],
       isDeleted: { $ne: true },
     })
@@ -204,6 +210,14 @@ export class ChatService {
           }
         }
 
+        if (!targetUserId && (conv.recruiter || conv.jobSeeker)) {
+          if (conv.recruiter && conv.recruiter.toString() !== userId) {
+            targetUserId = conv.recruiter.toString();
+          } else if (conv.jobSeeker && conv.jobSeeker.toString() !== userId) {
+            targetUserId = conv.jobSeeker.toString();
+          }
+        }
+
         const recipient = await this.getRecipientIdentity(targetUserId);
 
         const unreadCount = await Message.countDocuments({
@@ -221,7 +235,30 @@ export class ChatService {
       })
     );
 
-    return formattedConversations;
+    // Deduplicate conversations per recipient user so each contact only appears once
+    const deduplicatedMap = new Map<string, any>();
+    for (const conv of formattedConversations) {
+      const recipientKey = conv.recipient?.userId || conv.id;
+      if (!deduplicatedMap.has(recipientKey)) {
+        deduplicatedMap.set(recipientKey, conv);
+      } else {
+        const existing = deduplicatedMap.get(recipientKey);
+        const convHasMessage = Boolean(conv.lastMessage);
+        const existingHasMessage = Boolean(existing.lastMessage);
+
+        if (!existingHasMessage && convHasMessage) {
+          deduplicatedMap.set(recipientKey, conv);
+        } else if (existingHasMessage === convHasMessage) {
+          const t1 = new Date(conv.lastMessageAt || conv.updatedAt).getTime();
+          const t2 = new Date(existing.lastMessageAt || existing.updatedAt).getTime();
+          if (t1 > t2) {
+            deduplicatedMap.set(recipientKey, conv);
+          }
+        }
+      }
+    }
+
+    return Array.from(deduplicatedMap.values());
   }
 
   /**
