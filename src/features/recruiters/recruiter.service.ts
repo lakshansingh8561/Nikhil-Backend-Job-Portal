@@ -1,4 +1,4 @@
-import { RecruiterProfile, User, Job, Company } from "../../database/models";
+import { RecruiterProfile, User, Job, Company, UserProfile } from "../../database/models";
 import { ApiError } from "../../common/utils/ApiError";
 import { HTTP_STATUS } from "../../common/constants/httpStatus";
 import { Role } from "../../common/enums";
@@ -123,6 +123,8 @@ export class RecruiterService {
 
       filter.$or = [
         { currentCompany: { $regex: `^${l}`, $options: "i" } },
+        { firstName: { $regex: `^${l}`, $options: "i" } },
+        { lastName: { $regex: `^${l}`, $options: "i" } },
         { companyId: { $in: companyIds } },
       ];
     }
@@ -186,7 +188,7 @@ export class RecruiterService {
     // Compute real open jobs count and ensure companyId is populated for each recruiter
     const recruitersWithJobs = await Promise.all(
       recruiters.map(async (rec) => {
-        const recObj = rec.toObject();
+        const recObj: any = rec.toObject();
         const recUserId = typeof rec.userId === "object" && rec.userId !== null ? (rec.userId as any)._id : rec.userId;
 
         if (!recObj.companyId && recUserId) {
@@ -194,9 +196,45 @@ export class RecruiterService {
             $or: [{ userId: recUserId }, { ownerId: recUserId }],
           }).catch(() => null);
           if (comp) {
-            (recObj as any).companyId = comp;
+            recObj.companyId = comp;
             recObj.currentCompany = comp.name;
           }
+        }
+
+        // Dynamically resolve real location from RecruiterProfile, Company, UserProfile, or Job
+        let resolvedLoc = recObj.companyLocation || recObj.currentLocation || "";
+        if (!resolvedLoc && recObj.companyId?.location) {
+          const loc = recObj.companyId.location;
+          if (typeof loc === "string" && loc.trim()) {
+            resolvedLoc = loc.trim();
+          } else if (loc.city) {
+            resolvedLoc = `${loc.city}${loc.country ? `, ${loc.country}` : ""}`;
+          }
+        }
+        if (!resolvedLoc && recUserId) {
+          const userProf: any = await UserProfile.findOne({ userId: recUserId }).catch(() => null);
+          if (userProf?.location?.city) {
+            resolvedLoc = `${userProf.location.city}${userProf.location.country ? `, ${userProf.location.country}` : ""}`;
+          }
+        }
+        if (!resolvedLoc && recUserId) {
+          const job: any = await Job.findOne({
+            $or: [{ userId: recUserId }, { companyId: recObj.companyId?._id || recObj.companyId }],
+          })
+            .sort({ createdAt: -1 })
+            .catch(() => null);
+          if (job?.location) {
+            if (typeof job.location === "string" && job.location.trim()) {
+              resolvedLoc = job.location.trim();
+            } else if (job.location?.city) {
+              resolvedLoc = `${job.location.city}${job.location.country ? `, ${job.location.country}` : ""}`;
+            }
+          }
+        }
+
+        if (resolvedLoc) {
+          recObj.currentLocation = resolvedLoc;
+          recObj.companyLocation = resolvedLoc;
         }
 
         const openJobsCount = await Job.countDocuments({

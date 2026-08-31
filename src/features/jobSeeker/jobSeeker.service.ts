@@ -114,10 +114,24 @@ export class JobSeekerService {
 
     if (query.search && String(query.search).trim()) {
       const s = escapeRegExp(String(query.search).trim());
+      const isSingleLetter = s.length === 1;
+      const nameRegex = isSingleLetter ? `^${s}` : s;
+
+      const matchingUserProfiles = await UserProfile.find({
+        $or: [
+          { firstName: { $regex: nameRegex, $options: "i" } },
+          { lastName: { $regex: nameRegex, $options: "i" } },
+          { headline: { $regex: s, $options: "i" } },
+        ],
+      }).select("userId");
+
+      const matchingUserIds = matchingUserProfiles.map((up: any) => up.userId);
+
       filter.$or = [
-        { firstName: { $regex: s, $options: "i" } },
-        { lastName: { $regex: s, $options: "i" } },
+        { firstName: { $regex: nameRegex, $options: "i" } },
+        { lastName: { $regex: nameRegex, $options: "i" } },
         { headline: { $regex: s, $options: "i" } },
+        { userId: { $in: matchingUserIds } },
       ];
     }
 
@@ -135,13 +149,43 @@ export class JobSeekerService {
     const limit = Math.min(100, Math.max(1, Number(query.limit) || 10));
     const skip = (page - 1) * limit;
 
-    const profiles = await JobSeekerProfile.find(filter)
+    const rawProfiles = await JobSeekerProfile.find(filter)
       .populate("userId", "email role createdAt")
       .skip(skip)
       .limit(limit)
       .sort({ createdAt: -1 });
 
     const total = await JobSeekerProfile.countDocuments(filter);
+
+    // Merge UserProfile data (profilePicture, real names, skills, headline, bio)
+    const userIds = rawProfiles
+      .map((p: any) => p.userId?._id || p.userId)
+      .filter(Boolean);
+    const userProfiles = await UserProfile.find({ userId: { $in: userIds } });
+    const userProfileMap = new Map();
+    userProfiles.forEach((up: any) => {
+      userProfileMap.set(String(up.userId), up);
+    });
+
+    const profiles = rawProfiles.map((p: any) => {
+      const pObj: any = p.toObject ? p.toObject() : { ...p };
+      const uId = String(p.userId?._id || p.userId);
+      const uProf = userProfileMap.get(uId);
+      if (uProf) {
+        if (uProf.firstName) pObj.firstName = uProf.firstName;
+        if (uProf.lastName) pObj.lastName = uProf.lastName;
+        if (uProf.headline) pObj.headline = uProf.headline;
+        if (uProf.bio) pObj.bio = uProf.bio;
+        if (uProf.profilePicture) pObj.profilePicture = uProf.profilePicture;
+        if (uProf.skills && uProf.skills.length > 0) pObj.skills = uProf.skills;
+        if (!pObj.currentLocation && uProf.location?.city) {
+          pObj.currentLocation = `${uProf.location.city}${
+            uProf.location.country ? `, ${uProf.location.country}` : ""
+          }`;
+        }
+      }
+      return pObj;
+    });
 
     return {
       profiles,
