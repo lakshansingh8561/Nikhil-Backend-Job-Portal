@@ -194,6 +194,44 @@ export class CloudinaryService {
   }
 
   /**
+   * Upload blog image / cover / attachment -> 'Job-portal/Blogs'
+   */
+  static async uploadBlogImage(
+    fileBuffer: Buffer,
+    fileName?: string
+  ): Promise<{ url: string; public_id: string }> {
+    const instance = getCloudinaryInstance();
+
+    return new Promise((resolve) => {
+      const uploadStream = instance.uploader.upload_stream(
+        {
+          folder: "Job-portal/Blogs",
+          resource_type: "auto",
+          type: "upload",
+          use_filename: true,
+          unique_filename: true,
+        },
+        async (error, result) => {
+          if (error || !result) {
+            console.warn("⚠️ Cloudinary blog upload returned error:", error?.message || error);
+            console.log("ℹ️ Falling back to local storage for blog image...");
+            const fallback = await CloudinaryService.saveToLocalDisk(fileBuffer, "blogs", fileName);
+            return resolve(fallback);
+          }
+          console.log("🎉 Cloudinary Blog image uploaded successfully:", result.secure_url);
+          resolve({
+            url: result.secure_url,
+            public_id: result.public_id,
+          });
+        }
+      );
+
+      Readable.from(fileBuffer).pipe(uploadStream);
+    });
+  }
+
+
+  /**
    * Delete asset by public_id
    */
   static async deleteFile(publicId: string): Promise<boolean> {

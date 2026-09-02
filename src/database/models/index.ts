@@ -17,3 +17,5 @@ export * from "./comment";
 export * from "./connection";
 export * from "./follow";
 export * from "./savedPost";
+export * from "./blog";
+

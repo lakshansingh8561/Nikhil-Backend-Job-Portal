@@ -15,6 +15,7 @@ import { uploadRoutes } from "../features/upload/upload.routes";
 import postsRoutes from "../features/posts/posts.routes";
 import networkRoutes from "../features/network/network.routes";
 import { aiRoutes } from "../features/ai";
+import { blogRoutes } from "../features/blogs";
 
 const router = Router();
 
@@ -34,5 +35,7 @@ router.use("/upload", uploadRoutes);
 router.use("/posts", postsRoutes);
 router.use("/network", networkRoutes);
 router.use("/ai", aiRoutes);
+router.use("/blogs", blogRoutes);
 
 export default router;
+
