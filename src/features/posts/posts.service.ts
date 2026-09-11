@@ -1,5 +1,6 @@
 import { Types } from "mongoose";
 import {
+  User,
   Post,
   Comment,
   Job,
@@ -7,6 +8,7 @@ import {
   Follow,
   SavedPost,
 } from "../../database/models";
+import { EmailService } from "../../common/services/email.service";
 import { Role } from "../../common/enums/role.enum";
 import { ApiError } from "../../common/utils/ApiError";
 import { HTTP_STATUS } from "../../common/constants/httpStatus";
@@ -301,6 +303,11 @@ export class PostsService {
 
     emitBroadcast("feed:new-post", { post: shaped });
     await PostsService.notifyMentions(mentions, userId, newPost._id.toString(), "post");
+
+    // Asynchronously notify accepted connections via email (fire-and-forget, non-blocking)
+    PostsService.notifyConnectionsNewPost(userId, userRole, newPost._id.toString(), content).catch((err) => {
+      console.error("[PostsService] Error notifying connections of new post:", err);
+    });
 
     return shaped;
   }
@@ -1056,5 +1063,82 @@ export class PostsService {
     );
 
     emitToUsers(recipients, "notification:new", { type: "MENTION" });
+  }
+
+  /**
+   * Asynchronously send email notifications to all accepted connections when a User or Recruiter creates a post.
+   */
+  private static async notifyConnectionsNewPost(
+    authorId: string,
+    authorRole: Role,
+    postId: string,
+    content: string
+  ): Promise<void> {
+    try {
+      const me = asObjectId(authorId);
+
+      // 1. Find all ACCEPTED connections for the post author
+      const connectionRows = await Connection.find({
+        status: ConnectionStatus.ACCEPTED,
+        $or: [{ requesterId: me }, { recipientId: me }],
+      })
+        .select("requesterId recipientId")
+        .lean();
+
+      if (!connectionRows || connectionRows.length === 0) {
+        return;
+      }
+
+      // 2. Collect connection user IDs, filter out the post author, and ensure uniqueness
+      const connectionUserIdsSet = new Set<string>();
+      for (const row of connectionRows) {
+        const otherId =
+          row.requesterId.toString() === authorId
+            ? row.recipientId.toString()
+            : row.requesterId.toString();
+        if (otherId && otherId !== authorId) {
+          connectionUserIdsSet.add(otherId);
+        }
+      }
+
+      const connectionUserIds = Array.from(connectionUserIdsSet);
+      if (connectionUserIds.length === 0) return;
+
+      // 3. Fetch author information & recipient user records
+      const [authorMap, recipientUsers, recipientAuthorsMap] = await Promise.all([
+        hydrateAuthors([authorId]),
+        User.find({
+          _id: { $in: connectionUserIds.map((id) => asObjectId(id)) },
+          isDeleted: { $ne: true },
+        })
+          .select("_id email role")
+          .lean(),
+        hydrateAuthors(connectionUserIds),
+      ]);
+
+      const authorDTO = authorMap.get(authorId);
+      const authorName = authorDTO?.fullName || "A connection";
+      const previewText = content.length > 200 ? `${content.substring(0, 197)}...` : content;
+
+      // 4. Dispatch emails in parallel without blocking
+      await Promise.allSettled(
+        recipientUsers.map(async (recipient) => {
+          if (!recipient.email) return;
+          const recipientIdStr = recipient._id.toString();
+          const recipientName = recipientAuthorsMap.get(recipientIdStr)?.fullName || "Member";
+
+          await EmailService.sendNewPostNotificationToConnections({
+            recipientEmail: recipient.email,
+            recipientName,
+            authorName,
+            authorRole: authorRole || authorDTO?.role,
+            postContentPreview: previewText,
+            postId,
+          });
+        })
+      );
+    } catch (error) {
+      console.error("[PostsService] Failed to send post notification emails to connections:", error);
+    }
   }
 }

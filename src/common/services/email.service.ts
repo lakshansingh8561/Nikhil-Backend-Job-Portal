@@ -761,4 +761,87 @@ export class EmailService {
 
     return this.sendMail({ to: email, subject, html });
   }
+
+  /**
+   * 17. Send email notification to connections when a User or Recruiter creates a new post
+   */
+  public static async sendNewPostNotificationToConnections({
+    recipientEmail,
+    recipientName = "Member",
+    authorName,
+    authorRole,
+    postContentPreview,
+    postId,
+  }: {
+    recipientEmail: string;
+    recipientName?: string;
+    authorName: string;
+    authorRole?: string;
+    postContentPreview: string;
+    postId: string;
+  }): Promise<boolean> {
+    const roleLabel = authorRole
+      ? authorRole.toUpperCase() === "RECRUITER"
+        ? "Recruiter"
+        : "User"
+      : "";
+    const subject = `${authorName} posted something new on the Job Portal`;
+    const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+    const postUrl = `${frontendUrl}/network`;
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f5f7fc; margin: 0; padding: 0; }
+          .container { max-width: 600px; margin: 30px auto; background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.08); border: 1px solid #eaeff7; }
+          .header { background: linear-gradient(135deg, #05264E 0%, #3C65F5 100%); padding: 32px 24px; text-align: center; color: #ffffff; }
+          .header h1 { margin: 0; font-size: 24px; font-weight: 800; letter-spacing: -0.5px; }
+          .header p { margin: 8px 0 0; font-size: 14px; opacity: 0.9; }
+          .content { padding: 32px 24px; color: #05264E; }
+          .greeting { font-size: 18px; font-weight: 700; margin-bottom: 16px; color: #05264E; }
+          .message { font-size: 14px; line-height: 1.6; color: #66789c; margin-bottom: 24px; }
+          .card { background: #f8fafc; border-radius: 12px; padding: 20px; border: 1px solid #eaeff7; margin-bottom: 24px; }
+          .author-name { font-size: 16px; font-weight: 700; color: #05264E; margin-bottom: 4px; }
+          .author-role { font-size: 12px; font-weight: 600; color: #3C65F5; text-transform: uppercase; margin-bottom: 12px; }
+          .post-excerpt { font-size: 14px; line-height: 1.6; color: #334155; font-style: italic; background: #ffffff; padding: 14px; border-radius: 8px; border-left: 4px solid #3C65F5; }
+          .btn-container { text-align: center; margin: 32px 0 16px; }
+          .btn { background: #3C65F5; color: #ffffff !important; padding: 14px 32px; border-radius: 12px; font-size: 14px; font-weight: 700; text-decoration: none; display: inline-block; box-shadow: 0 4px 14px rgba(60,101,245,0.35); }
+          .footer { background: #f8fafc; padding: 20px; text-align: center; font-size: 12px; color: #94a3b8; border-top: 1px solid #eaeff7; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>JobBox Network</h1>
+            <p>New Post from Your Connection</p>
+          </div>
+          <div class="content">
+            <div class="greeting">Hi ${recipientName},</div>
+            <div class="message">
+              Someone in your network has created a new post on JobBox:
+            </div>
+            
+            <div class="card">
+              <div class="author-name">${authorName}</div>
+              ${roleLabel ? `<div class="author-role">${roleLabel}</div>` : ""}
+              ${postContentPreview ? `<div class="post-excerpt">"${postContentPreview}"</div>` : ""}
+            </div>
+
+            <div class="btn-container">
+              <a href="${postUrl}" class="btn">View Post</a>
+            </div>
+          </div>
+          <div class="footer">
+            © ${new Date().getFullYear()} JobBox Recruitment Platform. All rights reserved.
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    return this.sendMail({ to: recipientEmail, subject, html });
+  }
 }

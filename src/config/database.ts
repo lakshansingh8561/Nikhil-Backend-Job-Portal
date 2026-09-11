@@ -12,7 +12,7 @@ export const connectDatabase = async (): Promise<void> => {
     try {
       const collection = mongoose.connection.collection("payments");
       const indexes = await collection.indexes();
-      
+
       const problematicIndexes = [
         "provider_1_providerPaymentId_1",
         "providerPaymentId_1",
